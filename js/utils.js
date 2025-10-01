@@ -100,7 +100,18 @@ export function applyTransformations(layer) {
      }
 
     layer.rotation = 0;
-    layer.pivot = { x: 0, y: 0 };
+
+    const newBox = getBoundingBox(layer);
+    if (newBox) {
+        const newCenterX = newBox.x + newBox.width / 2;
+        const newCenterY = newBox.y + newBox.height / 2;
+        layer.pivot = {
+            x: pivotPoint.x - newCenterX,
+            y: pivotPoint.y - newCenterY,
+        };
+    } else {
+        layer.pivot = { x: 0, y: 0 };
+    }
 }
 
 function perpendicularDistance(pt, p1, p2) {
