@@ -37,11 +37,18 @@ export function initializeCanvas(canvas, ctx, redrawCallback, saveState, updateT
         eraserAnimationId: null,
         lastEraserPos: { x: 0, y: 0 },
         isEditingText: false,
+        activePointers: new Map(),
+        isPinching: false,
+        initialPinchDistance: 0,
+        initialPinchZoom: 1,
+        initialPinchWorld: { x: 0, y: 0 },
     };
-    
+
     // --- НАЧАЛО ИЗМЕНЕНИЙ: Добавляем функцию обновления редактора в состояние холста ---
     state.updateTextEditorStyle = textTool.updateEditorStyle;
     // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
+    const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
     state.updateFloatingToolbar = () => {
         const toolbar = document.getElementById('floating-text-toolbar');
@@ -101,6 +108,71 @@ export function initializeCanvas(canvas, ctx, redrawCallback, saveState, updateT
 
     const NUM_TRAIL_NODES = 15;
     const EASING_FACTOR = 0.2;
+
+    function updateTouchPointer(e) {
+        if (e.pointerType !== 'touch') return;
+        const rect = canvas.getBoundingClientRect();
+        state.activePointers.set(e.pointerId, {
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top,
+        });
+    }
+
+    function removeTouchPointer(e) {
+        if (e.pointerType !== 'touch') return;
+        state.activePointers.delete(e.pointerId);
+    }
+
+    function beginPinchGesture() {
+        if (state.activePointers.size < 2) return false;
+        const pointers = Array.from(state.activePointers.values()).slice(0, 2);
+        const [first, second] = pointers;
+        const distance = Math.hypot(second.x - first.x, second.y - first.y) || 1;
+
+        if (state.isDrawing || state.currentAction.startsWith('drawing')) {
+            state.isDrawing = false;
+            state.currentAction = 'none';
+            state.tempLayer = null;
+        }
+
+        if (state.eraserAnimationId) {
+            cancelAnimationFrame(state.eraserAnimationId);
+            state.eraserAnimationId = null;
+        }
+
+        state.isPinching = true;
+        state.initialPinchDistance = distance;
+        state.initialPinchZoom = state.zoom;
+        const center = {
+            x: (first.x + second.x) / 2,
+            y: (first.y + second.y) / 2,
+        };
+        state.initialPinchWorld = {
+            x: (center.x - state.panX) / state.zoom,
+            y: (center.y - state.panY) / state.zoom,
+        };
+        return true;
+    }
+
+    function updatePinchGesture() {
+        if (!state.isPinching || state.activePointers.size < 2) return;
+        const pointers = Array.from(state.activePointers.values()).slice(0, 2);
+        const [first, second] = pointers;
+        const distance = Math.hypot(second.x - first.x, second.y - first.y) || 1;
+        const scale = distance / (state.initialPinchDistance || distance);
+        const newZoom = clamp(state.initialPinchZoom * scale, 0.1, 10);
+        const center = {
+            x: (first.x + second.x) / 2,
+            y: (first.y + second.y) / 2,
+        };
+
+        state.zoom = newZoom;
+        state.panX = center.x - state.initialPinchWorld.x * newZoom;
+        state.panY = center.y - state.initialPinchWorld.y * newZoom;
+
+        redrawCallback();
+        state.updateFloatingToolbar();
+    }
 
     function animateEraserTrail() {
         state.eraserAnimationId = requestAnimationFrame(animateEraserTrail);
@@ -196,6 +268,18 @@ export function initializeCanvas(canvas, ctx, redrawCallback, saveState, updateT
 
     function startDrawing(e) {
         if (state.isEditingText) return;
+        if (e.pointerType === 'touch') {
+            updateTouchPointer(e);
+            if (state.activePointers.size >= 2) {
+                if (!state.isPinching) {
+                    beginPinchGesture();
+                }
+                updatePinchGesture();
+                return;
+            } else {
+                state.isPinching = false;
+            }
+        }
         const pos = getMousePos(e);
 
         // --- НАЧАЛО ИЗМЕНЕНИЙ: Логика для быстрого редактирования текста ---
@@ -441,6 +525,26 @@ export function initializeCanvas(canvas, ctx, redrawCallback, saveState, updateT
     function draw(e) {
         if (state.isEditingText) return;
 
+        if (e.pointerType === 'touch') {
+            updateTouchPointer(e);
+            if (state.activePointers.size >= 2) {
+                if (!state.isPinching) {
+                    beginPinchGesture();
+                }
+                updatePinchGesture();
+                return;
+            }
+
+            if (state.isPinching) {
+                updatePinchGesture();
+                return;
+            }
+        }
+
+        if (state.isPinching) {
+            return;
+        }
+
         if (state.isPanning) { const dx = e.clientX - state.panStartPos.x; const dy = e.clientY - state.panStartPos.y; state.panX += dx; state.panY += dy; state.panStartPos = { x: e.clientX, y: e.clientY }; redrawCallback(); state.updateFloatingToolbar(); return; }
         const pos = getMousePos(e);
 
@@ -519,6 +623,22 @@ export function initializeCanvas(canvas, ctx, redrawCallback, saveState, updateT
 
     function stopDrawing(e) {
         if (state.isEditingText) return;
+
+        if (e.pointerType === 'touch') {
+            removeTouchPointer(e);
+            if (state.isPinching) {
+                if (state.activePointers.size < 2) {
+                    state.isPinching = false;
+                    state.initialPinchDistance = 0;
+                    if (state.activePointers.size === 0) {
+                        state.initialPinchWorld = { x: 0, y: 0 };
+                    }
+                }
+                redrawCallback();
+                state.updateFloatingToolbar();
+                return;
+            }
+        }
 
         clearTimeout(state.shapeRecognitionTimer);
         if (state.eraserAnimationId) {
@@ -770,10 +890,16 @@ export function initializeCanvas(canvas, ctx, redrawCallback, saveState, updateT
         }
     }
     
-    canvas.addEventListener('pointerdown', startDrawing); 
-    canvas.addEventListener('pointermove', draw); 
+    canvas.addEventListener('pointerdown', startDrawing);
+    canvas.addEventListener('pointermove', draw);
     canvas.addEventListener('pointerup', stopDrawing);
-    canvas.addEventListener('pointerleave', (e) => { if (state.isDrawing || state.currentAction !== 'none' || state.isPanning) { stopDrawing(e); } state.isPanning = false; });
+    canvas.addEventListener('pointerleave', (e) => {
+        if (state.isDrawing || state.currentAction !== 'none' || state.isPanning || state.isPinching || (e.pointerType === 'touch' && state.activePointers.size > 0)) {
+            stopDrawing(e);
+        }
+        state.isPanning = false;
+    });
+    canvas.addEventListener('pointercancel', stopDrawing);
     
     canvas.addEventListener('wheel', (e) => {
         e.preventDefault(); 
