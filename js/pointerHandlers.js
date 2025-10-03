@@ -7,45 +7,81 @@ import * as shapeRecognizer from './shapeRecognizer.js';
 import * as textTool from './text.js';
 import { animateEraserTrail, updateCursor } from './ui.js';
 
-// --- НАЧАЛО ИЗМЕНЕНИЙ: Новая функция для обработки кнопки S-Pen ---
+// --- НАЧАЛО ИЗМЕНЕНИЙ: Улучшенная логика для кнопки S-Pen ---
 /**
- * Проверяет состояние кнопки стилуса и временно переключает инструмент на ластик.
- * @param {object} state - Текущее состояние холста.
- * @param {PointerEvent} e - Событие указателя.
- * @param {function} updateToolbarCallback - Функция для обновления UI тулбара.
+ * Динамически переключает инструмент на ластик при зажатии кнопки S-Pen и обратно.
+ * Возвращает true, если состояние было изменено, иначе false.
  */
-function handleSpenButton(state, e, updateToolbarCallback) {
-    // Эта логика работает только для стилуса
+function checkAndHandleSpenEraser(state, e, callbacks) {
     if (e.pointerType !== 'pen') {
-        // Если активен режим ластика, но используется другой указатель, сбрасываем состояние
-        if (state.isSpenEraserActive) {
-            state.activeTool = state.toolBeforeSpenEraser;
-            state.isSpenEraserActive = false;
-            state.toolBeforeSpenEraser = null;
-            if (updateToolbarCallback) updateToolbarCallback();
-        }
-        return;
+        return false;
     }
 
-    // Проверяем, зажата ли боковая кнопка (e.buttons & 2 вернет не-ноль, если второй бит установлен)
+    const { redrawCallback, saveState, updateToolbarCallback } = callbacks;
     const isButtonPressed = (e.buttons & 2) !== 0;
 
     if (isButtonPressed && !state.isSpenEraserActive) {
-        // Кнопка только что была нажата: сохраняем текущий инструмент и переключаемся на ластик
+        // --- ПЕРЕКЛЮЧЕНИЕ НА ЛАСТИК ---
+        // 1. Если шло рисование другим инструментом, завершаем его.
+        if (state.isDrawing && state.tempLayer) {
+            if (state.tempLayer.points && state.tempLayer.points.length > 1) {
+                state.layers.push(state.tempLayer);
+                saveState(state.layers);
+            }
+            state.tempLayer = null;
+            redrawCallback();
+        }
+
+        // 2. Сохраняем текущий инструмент и активируем режим ластика
         state.toolBeforeSpenEraser = state.activeTool;
         state.activeTool = 'eraser';
         state.isSpenEraserActive = true;
-        // Очищаем временный слой, чтобы предотвратить "залипание" фигур
-        state.tempLayer = null; 
-        state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
+        state.isDrawing = true; // Сразу начинаем рисовать ластиком
+        
+        // 3. Инициализируем ластик (как в startDrawing)
+        const pos = utils.getMousePos(e, state);
+        state.startPos = pos;
+        state.didErase = false;
+        state.layersToErase.clear();
+        state.canvas.classList.add('cursor-eraser');
+        
+        // Запускаем анимацию или отображение курсора ластика
+        if (!document.body.classList.contains('no-animations')) {
+            state.lastEraserPos = pos;
+            state.eraserTrailNodes = Array(10).fill(null).map(() => ({ ...pos }));
+            if (state.eraserAnimationId) cancelAnimationFrame(state.eraserAnimationId);
+            animateEraserTrail(state);
+        }
+
+        return true; // Состояние изменилось
     } else if (!isButtonPressed && state.isSpenEraserActive) {
-        // Кнопка только что была отпущена: возвращаем предыдущий инструмент
+        // --- ВОЗВРАТ К ПРЕДЫДУЩЕМУ ИНСТРУМЕНТУ ---
+        // 1. Завершаем действие ластика
+        if (state.isDrawing && state.didErase) {
+            const idsToErase = new Set(Array.from(state.layersToErase).map(l => l.id));
+            state.layers = state.layers.filter(layer => !idsToErase.has(layer.id));
+            saveState(state.layers);
+            redrawCallback();
+        }
+        
+        // 2. Сбрасываем все состояния рисования и ластика
+        state.isDrawing = false;
+        state.didErase = false;
+        state.layersToErase.clear();
+        if (state.eraserAnimationId) cancelAnimationFrame(state.eraserAnimationId);
+        state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
+
+        // 3. Восстанавливаем инструмент
         state.activeTool = state.toolBeforeSpenEraser;
         state.isSpenEraserActive = false;
         state.toolBeforeSpenEraser = null;
-        // Обновляем UI тулбара, чтобы показать правильный активный инструмент
-        if (updateToolbarCallback) updateToolbarCallback();
+        state.canvas.classList.remove('cursor-eraser');
+        updateToolbarCallback();
+
+        return true; // Состояние изменилось
     }
+
+    return false; // Состояние не менялось
 }
 // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
@@ -103,9 +139,10 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
 
     const { redrawCallback, saveState, updateToolbarCallback } = callbacks;
 
-    // --- НАЧАЛО ИЗМЕНЕНИЙ: Вызываем обработчик S-Pen ---
-    handleSpenButton(state, e, updateToolbarCallback);
-    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+    if (checkAndHandleSpenEraser(state, e, callbacks)) {
+        // Если обработчик S-Pen сработал, он уже настроил состояние,
+        // можно начинать обработку рисования ластиком.
+    }
 
     const pos = utils.getMousePos(e, state);
     let finalPos = pos;
@@ -421,10 +458,13 @@ export function draw(state, callbacks, e) {
     if (state.isMultiTouching) return;
 
     const { redrawCallback, saveState, updateToolbarCallback } = callbacks;
-
-    // --- НАЧАЛО ИЗМЕНЕНИЙ: Вызываем обработчик S-Pen ---
-    handleSpenButton(state, e, updateToolbarCallback);
-    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+    
+    if (checkAndHandleSpenEraser(state, e, callbacks)) {
+        // Если состояние изменилось (например, кнопка была нажата/отпущена),
+        // дальнейшая обработка этого конкретного события `draw` не нужна,
+        // так как состояние рисования уже было сброшено или переинициализировано.
+        return;
+    }
 
     const pos = utils.getMousePos(e, state);
     
@@ -598,24 +638,12 @@ export function stopDrawing(state, callbacks, e) {
     if (state.isMultiTouching) return;
 
     const { redrawCallback, saveState, updateToolbarCallback } = callbacks;
-    
-    // --- НАЧАЛО ИЗМЕНЕНИЙ: Сбрасываем состояние ластика S-Pen при завершении жеста ---
-    if (state.isSpenEraserActive) {
-        // Если ластик был активен, выполняем его логику сохранения
-        if (state.didErase) {
-            const idsToErase = new Set(Array.from(state.layersToErase).map(l => l.id));
-            state.layers = state.layers.filter(layer => !idsToErase.has(layer.id));
-            state.layersToErase.clear();
-            saveState(state.layers);
-        }
-        // Восстанавливаем предыдущий инструмент
-        state.activeTool = state.toolBeforeSpenEraser;
-        state.toolBeforeSpenEraser = null;
-        state.isSpenEraserActive = false;
-        updateToolbarCallback();
-    }
-    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
+    if (checkAndHandleSpenEraser(state, e, callbacks)) {
+        // Если кнопка была отпущена, обработчик уже все завершил.
+        return;
+    }
+    
     const isSettingUpMultiStep = ['parallelogram', 'triangle', 'parallelepiped', 'pyramid', 'truncated-pyramid', 'trapezoid', 'frustum', 'truncated-sphere'].includes(state.activeTool) && state.isDrawing;
     if (isSettingUpMultiStep) {
         state.isDrawing = false; 
