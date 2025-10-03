@@ -782,6 +782,7 @@ body.no-transparency::after {
         align-items: flex-start;
         gap: 10px;
         width: auto;
+        height: 560px; /* --- НАЧАЛО ИЗМЕНЕНИЙ --- */
     }
     
     .toolbar-wrapper .toggle-toolbar {
@@ -791,6 +792,7 @@ body.no-transparency::after {
     
     .toolbar-wrapper.collapsed {
         pointer-events: none;
+        height: auto; /* --- КОНЕЦ ИЗМЕНЕНИЙ --- */
     }
 
     .toolbar-wrapper.collapsed .toggle-toolbar {
