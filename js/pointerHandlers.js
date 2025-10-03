@@ -7,6 +7,49 @@ import * as shapeRecognizer from './shapeRecognizer.js';
 import * as textTool from './text.js';
 import { animateEraserTrail, updateCursor } from './ui.js';
 
+// --- НАЧАЛО ИЗМЕНЕНИЙ: Новая функция для обработки кнопки S-Pen ---
+/**
+ * Проверяет состояние кнопки стилуса и временно переключает инструмент на ластик.
+ * @param {object} state - Текущее состояние холста.
+ * @param {PointerEvent} e - Событие указателя.
+ * @param {function} updateToolbarCallback - Функция для обновления UI тулбара.
+ */
+function handleSpenButton(state, e, updateToolbarCallback) {
+    // Эта логика работает только для стилуса
+    if (e.pointerType !== 'pen') {
+        // Если активен режим ластика, но используется другой указатель, сбрасываем состояние
+        if (state.isSpenEraserActive) {
+            state.activeTool = state.toolBeforeSpenEraser;
+            state.isSpenEraserActive = false;
+            state.toolBeforeSpenEraser = null;
+            if (updateToolbarCallback) updateToolbarCallback();
+        }
+        return;
+    }
+
+    // Проверяем, зажата ли боковая кнопка (e.buttons & 2 вернет не-ноль, если второй бит установлен)
+    const isButtonPressed = (e.buttons & 2) !== 0;
+
+    if (isButtonPressed && !state.isSpenEraserActive) {
+        // Кнопка только что была нажата: сохраняем текущий инструмент и переключаемся на ластик
+        state.toolBeforeSpenEraser = state.activeTool;
+        state.activeTool = 'eraser';
+        state.isSpenEraserActive = true;
+        // Очищаем временный слой, чтобы предотвратить "залипание" фигур
+        state.tempLayer = null; 
+        state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
+    } else if (!isButtonPressed && state.isSpenEraserActive) {
+        // Кнопка только что была отпущена: возвращаем предыдущий инструмент
+        state.activeTool = state.toolBeforeSpenEraser;
+        state.isSpenEraserActive = false;
+        state.toolBeforeSpenEraser = null;
+        // Обновляем UI тулбара, чтобы показать правильный активный инструмент
+        if (updateToolbarCallback) updateToolbarCallback();
+    }
+}
+// --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
+
 function handleTripleClick(state, callbacks, pos) {
     const layer = hitTest.getLayerAtPosition(pos, state.layers);
     if (layer) {
@@ -58,18 +101,12 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
         subToolbar.classList.add('sub-toolbar-collapsed');
     }
 
-    // --- НАЧАЛО ИЗМЕНЕНИЙ: Логика для кнопки S-Pen ---
-    // e.buttons === 2 соответствует нажатию боковой кнопки на стилусе
-    if (e.pointerType === 'pen' && e.buttons === 2) {
-        if (state.activeTool !== 'eraser') {
-            state.toolBeforeSpenEraser = state.activeTool;
-            state.isSpenEraserActive = true;
-            state.activeTool = 'eraser';
-        }
-    }
+    const { redrawCallback, saveState, updateToolbarCallback } = callbacks;
+
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Вызываем обработчик S-Pen ---
+    handleSpenButton(state, e, updateToolbarCallback);
     // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
-    const { redrawCallback, saveState, updateToolbarCallback } = callbacks;
     const pos = utils.getMousePos(e, state);
     let finalPos = pos;
     if (e.altKey) {
@@ -210,7 +247,7 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
         state.canvas.style.cursor = 'grabbing';
         return;
     }
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (e.pointerType === 'mouse' && e.button !== 0 && !state.isSpenEraserActive) return;
     
     hideContextMenu();
 
@@ -383,7 +420,12 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
 export function draw(state, callbacks, e) {
     if (state.isMultiTouching) return;
 
-    const { redrawCallback, saveState } = callbacks;
+    const { redrawCallback, saveState, updateToolbarCallback } = callbacks;
+
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Вызываем обработчик S-Pen ---
+    handleSpenButton(state, e, updateToolbarCallback);
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
     const pos = utils.getMousePos(e, state);
     
     if (state.isPanning) { 
@@ -557,6 +599,23 @@ export function stopDrawing(state, callbacks, e) {
 
     const { redrawCallback, saveState, updateToolbarCallback } = callbacks;
     
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Сбрасываем состояние ластика S-Pen при завершении жеста ---
+    if (state.isSpenEraserActive) {
+        // Если ластик был активен, выполняем его логику сохранения
+        if (state.didErase) {
+            const idsToErase = new Set(Array.from(state.layersToErase).map(l => l.id));
+            state.layers = state.layers.filter(layer => !idsToErase.has(layer.id));
+            state.layersToErase.clear();
+            saveState(state.layers);
+        }
+        // Восстанавливаем предыдущий инструмент
+        state.activeTool = state.toolBeforeSpenEraser;
+        state.toolBeforeSpenEraser = null;
+        state.isSpenEraserActive = false;
+        updateToolbarCallback();
+    }
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
     const isSettingUpMultiStep = ['parallelogram', 'triangle', 'parallelepiped', 'pyramid', 'truncated-pyramid', 'trapezoid', 'frustum', 'truncated-sphere'].includes(state.activeTool) && state.isDrawing;
     if (isSettingUpMultiStep) {
         state.isDrawing = false; 
@@ -858,16 +917,6 @@ export function stopDrawing(state, callbacks, e) {
         state.updateFloatingToolbar();
         state.currentAction = 'none';
     }
-    
-    // --- НАЧАЛО ИЗМЕНЕНИЙ: Логика восстановления инструмента после отпускания кнопки S-Pen ---
-    if (state.isSpenEraserActive) {
-        state.activeTool = state.toolBeforeSpenEraser;
-        state.toolBeforeSpenEraser = null;
-        state.isSpenEraserActive = false;
-        // Обновляем UI, чтобы показать правильный активный инструмент
-        updateToolbarCallback(); 
-    }
-    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
     state.isDrawing = false; 
     state.currentAction = 'none'; 
