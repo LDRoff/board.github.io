@@ -74,8 +74,10 @@ function wrapText(ctx, text, maxWidth) {
     return allLines;
 }
 
-export function drawLayer(ctx, layer) {
+export function drawLayer(ctx, layer, canvasState) {
     if (!layer) return;
+    const zoom = canvasState ? canvasState.zoom : 1;
+
     ctx.save();
     
     const rotation = layer.rotation || 0;
@@ -116,6 +118,16 @@ export function drawLayer(ctx, layer) {
 
     if (layer.isEditing) {
         ctx.globalAlpha = 0; 
+    }
+
+    const hasShadow = layer.type === 'image' || layer.type === 'pdf';
+    if (hasShadow) {
+        ctx.save();
+        const theme = localStorage.getItem('boardTheme') || 'light';
+        ctx.shadowColor = theme === 'dark' ? 'rgba(0, 0, 0, 0.6)' : 'rgba(0, 0, 0, 0.3)';
+        ctx.shadowBlur = 15 / zoom;
+        ctx.shadowOffsetX = 4 / zoom;
+        ctx.shadowOffsetY = 4 / zoom;
     }
 
     if (layer.type === 'path') {
@@ -341,6 +353,11 @@ export function drawLayer(ctx, layer) {
     else if (layer.type === 'image' && layer.image instanceof HTMLImageElement && layer.image.complete) { 
         ctx.drawImage(layer.image, layer.x, layer.y, layer.width, layer.height); 
     }
+
+    if (hasShadow) {
+        ctx.restore();
+    }
+
     ctx.restore();
 }
 
@@ -366,12 +383,10 @@ function drawSelectionBox(ctx, selectedLayers, canvasState) {
     let pivotX = centerX;
     let pivotY = centerY;
 
-    // --- НАЧАЛО ИЗМЕНЕНИЙ: Исправляем вычисление точки вращения для рамки ---
     if (isSingleSelection && layer && layer.pivot) {
         pivotX = centerX + layer.pivot.x;
         pivotY = centerY + layer.pivot.y;
     }
-    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
     ctx.save();
     ctx.translate(pivotX, pivotY);
@@ -435,7 +450,7 @@ export function redrawCanvas(canvasState) {
     
     layers.forEach(layer => {
         if (!layersToErase.has(layer)) {
-            drawLayer(ctx, layer);
+            drawLayer(ctx, layer, canvasState);
         }
     });
 
