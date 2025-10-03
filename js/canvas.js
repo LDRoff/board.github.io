@@ -42,23 +42,22 @@ export function initializeCanvas(canvas, interactionCanvas, ctx, redrawCallback,
     const onTouchEnd = touch.handleTouchEnd.bind(null, state);
 
     canvas.addEventListener('pointerdown', onPointerDown);
-    // --- НАЧАЛО ИЗМЕНЕНИЙ: Добавляем постоянный слушатель для обновления курсора при наведении ---
     canvas.addEventListener('pointermove', state.onPointerMove);
-    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
     
     canvas.addEventListener('touchstart', onTouchStart, { passive: false });
     canvas.addEventListener('touchmove', onTouchMove, { passive: false });
     canvas.addEventListener('touchend', onTouchEnd);
 
-    // --- НАЧАЛО ИЗМЕНЕНИЙ: Расширяем обработку ухода курсора с холста ---
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Расширяем обработку ухода курсора с холста для S-Pen ---
     const handlePointerEndOutside = () => {
+        // Сбрасываем состояние ластика S-Pen, если курсор покинул холст
         if (state.isSpenEraserActive) {
             if (state.isDrawing && state.didErase) {
                 const ids = new Set(Array.from(state.layersToErase).map(l => l.id));
                 state.layers = state.layers.filter(l => !ids.has(l.id));
                 saveState(state.layers);
-                redrawCallback();
             }
+            // Полная очистка состояния
             state.isDrawing = false;
             state.didErase = false;
             state.layersToErase.clear();
@@ -67,14 +66,15 @@ export function initializeCanvas(canvas, interactionCanvas, ctx, redrawCallback,
                 state.eraserAnimationId = null;
             }
             state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
-
             state.activeTool = state.toolBeforeSpenEraser;
             state.isSpenEraserActive = false;
             state.toolBeforeSpenEraser = null;
             state.canvas.classList.remove('cursor-eraser');
             updateToolbarCallback();
+            redrawCallback();
         }
 
+        // Существующая логика для панорамирования
         if (state.isPanning) { 
             state.isPanning = false; 
             document.removeEventListener('pointermove', state.onPointerMove);
