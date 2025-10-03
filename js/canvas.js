@@ -11,10 +11,8 @@ import * as hitTest from './hitTest.js';
 export function initializeCanvas(canvas, interactionCanvas, ctx, redrawCallback, saveState, updateToolbarCallback) {
     const iCtx = interactionCanvas.getContext('2d');
     
-    // Объект обратных вызовов для передачи в обработчики
     const callbacks = { redrawCallback, saveState, updateToolbarCallback };
 
-    // 1. Создание и расширение состояния
     const state = {
         ...createInitialState(),
         canvas, ctx,
@@ -22,7 +20,6 @@ export function initializeCanvas(canvas, interactionCanvas, ctx, redrawCallback,
         saveState
     };
 
-    // 2. Привязка функций к состоянию для внешнего и внутреннего использования
     state.updateFloatingToolbar = ui.updateFloatingToolbar.bind(null, state);
     state.updateTextEditorStyle = textTool.updateEditorStyle;
     state.updateTextEditorTransform = textTool.updateTextEditorTransform;
@@ -34,10 +31,8 @@ export function initializeCanvas(canvas, interactionCanvas, ctx, redrawCallback,
         iCtx.clearRect(0, 0, interactionCanvas.width, interactionCanvas.height);
     };
 
-    // 3. Настройка обработчиков событий
     const hideContextMenu = ui.setupContextMenu(state, callbacks);
     
-    // Создаем привязанные версии обработчиков для возможности их последующего удаления
     state.onPointerMove = pointer.draw.bind(null, state, callbacks);
     state.onPointerUp = pointer.stopDrawing.bind(null, state, callbacks);
     
@@ -46,7 +41,6 @@ export function initializeCanvas(canvas, interactionCanvas, ctx, redrawCallback,
     const onTouchMove = touch.handleTouchMove.bind(null, state, callbacks);
     const onTouchEnd = touch.handleTouchEnd.bind(null, state);
 
-    // 4. Добавление прослушивателей событий
     canvas.addEventListener('pointerdown', onPointerDown);
     // --- НАЧАЛО ИЗМЕНЕНИЙ: Добавляем постоянный слушатель для обновления курсора при наведении ---
     canvas.addEventListener('pointermove', state.onPointerMove);
@@ -56,13 +50,41 @@ export function initializeCanvas(canvas, interactionCanvas, ctx, redrawCallback,
     canvas.addEventListener('touchmove', onTouchMove, { passive: false });
     canvas.addEventListener('touchend', onTouchEnd);
 
-    canvas.addEventListener('pointerleave', () => { 
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Расширяем обработку ухода курсора с холста ---
+    const handlePointerEndOutside = () => {
+        if (state.isSpenEraserActive) {
+            if (state.isDrawing && state.didErase) {
+                const ids = new Set(Array.from(state.layersToErase).map(l => l.id));
+                state.layers = state.layers.filter(l => !ids.has(l.id));
+                saveState(state.layers);
+                redrawCallback();
+            }
+            state.isDrawing = false;
+            state.didErase = false;
+            state.layersToErase.clear();
+            if (state.eraserAnimationId) {
+                cancelAnimationFrame(state.eraserAnimationId);
+                state.eraserAnimationId = null;
+            }
+            state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
+
+            state.activeTool = state.toolBeforeSpenEraser;
+            state.isSpenEraserActive = false;
+            state.toolBeforeSpenEraser = null;
+            state.canvas.classList.remove('cursor-eraser');
+            updateToolbarCallback();
+        }
+
         if (state.isPanning) { 
             state.isPanning = false; 
             document.removeEventListener('pointermove', state.onPointerMove);
             document.removeEventListener('pointerup', state.onPointerUp);
         } 
-    });
+    };
+
+    canvas.addEventListener('pointerleave', handlePointerEndOutside);
+    canvas.addEventListener('pointercancel', handlePointerEndOutside);
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
     
     canvas.addEventListener('wheel', (e) => {
         e.preventDefault(); 
@@ -100,7 +122,6 @@ export function initializeCanvas(canvas, interactionCanvas, ctx, redrawCallback,
             }
             
             const contextMenu = document.getElementById('contextMenu');
-            // Сначала делаем меню видимым, чтобы измерить его размеры
             contextMenu.style.left = '0px';
             contextMenu.style.top = '0px';
             contextMenu.classList.add('visible');
@@ -113,7 +134,6 @@ export function initializeCanvas(canvas, interactionCanvas, ctx, redrawCallback,
             let left = e.clientX;
             let top = e.clientY;
 
-            // Корректируем позицию, чтобы меню не выходило за пределы экрана
             if (left + menuWidth > vpWidth - margin) {
                 left = vpWidth - menuWidth - margin;
             }
