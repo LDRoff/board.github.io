@@ -137,7 +137,12 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
 
     const pos = utils.getMousePos(e, state);
     let finalPos = pos;
-    const shouldSnap = (state.snappingMode === 'manual' && e.altKey) || (state.snappingMode === 'auto' && !e.altKey);
+    
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Отключаем примагничивание для кистей ---
+    const isSnappingTool = !['brush', 'smart-brush'].includes(state.activeTool);
+    const shouldSnap = isSnappingTool && ((state.snappingMode === 'manual' && e.altKey) || (state.snappingMode === 'auto' && !e.altKey));
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
     if (shouldSnap) {
         const SNAP_THRESHOLD = 10 / state.zoom;
         const snappedX = utils.snapToGrid(pos.x);
@@ -398,13 +403,13 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
     updateToolbarCallback();
     state.updateFloatingToolbar();
     state.isDrawing = true; 
-    state.startPos = pos;
+    state.startPos = finalPos;
     
     if (state.activeTool === 'brush' || state.activeTool === 'smart-brush') {
         state.tempLayer = { type: 'path', points: [], color: state.activeColor, lineWidth: state.activeLineWidth, id: Date.now(), rotation: 0, pivot: { x: 0, y: 0 }, lineStyle: state.activeLineStyle };
         const pressure = e.pressure > 0 ? e.pressure : 0.5;
-        state.tempLayer.points.push({...pos, pressure });
-        state.lastBrushPoint = pos;
+        state.tempLayer.points.push({...finalPos, pressure });
+        state.lastBrushPoint = finalPos;
 
         state.iCtx.lineCap = 'round';
         state.iCtx.lineJoin = 'round';
@@ -417,7 +422,7 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
             state.iCtx.scale(state.zoom, state.zoom);
             state.iCtx.beginPath();
             const radius = Math.max(0.5, state.activeLineWidth / 2);
-            state.iCtx.arc(pos.x, pos.y, radius, 0, 2 * Math.PI);
+            state.iCtx.arc(finalPos.x, finalPos.y, radius, 0, 2 * Math.PI);
             state.iCtx.fill();
             state.iCtx.restore();
         }
@@ -426,8 +431,8 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
         state.didErase = false;
         
         if (!document.body.classList.contains('no-animations')) {
-            state.lastEraserPos = pos;
-            state.eraserTrailNodes = Array(10).fill(null).map(() => ({ ...pos }));
+            state.lastEraserPos = finalPos;
+            state.eraserTrailNodes = Array(10).fill(null).map(() => ({ ...finalPos }));
             if (state.eraserAnimationId) {
                 cancelAnimationFrame(state.eraserAnimationId);
             }
@@ -438,12 +443,12 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
             state.iCtx.scale(state.zoom, state.zoom);
             state.iCtx.fillStyle = 'rgba(135, 206, 250, 0.75)';
             state.iCtx.beginPath();
-            state.iCtx.arc(pos.x, pos.y, 12 / state.zoom, 0, 2 * Math.PI);
+            state.iCtx.arc(finalPos.x, finalPos.y, 12 / state.zoom, 0, 2 * Math.PI);
             state.iCtx.fill();
             state.iCtx.restore();
         }
 
-        const layerToErase = hitTest.getLayerAtPosition(pos, state.layers);
+        const layerToErase = hitTest.getLayerAtPosition(finalPos, state.layers);
         if (layerToErase && layerToErase.type !== 'image' && layerToErase.type !== 'pdf') {
             state.layersToErase.add(layerToErase);
             state.didErase = true;
