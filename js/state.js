@@ -1,0 +1,66 @@
+// --- START OF FILE js/state.js ---
+
+export function createInitialState() {
+    return {
+        isDrawing: false,
+        layers: [],
+        activeTool: 'brush',
+        previousTool: 'brush',
+        startPos: null,
+        selectedLayers: [],
+        currentAction: 'none',
+        dragStartPos: null,
+        scalingHandle: null,
+        activeColor: '#000000',
+        activeLineWidth: 1,
+        activeLineStyle: 'solid',
+        activeTextColor: '#000000',
+        activeFontFamily: 'Arial',
+        activeFontSize: 30,
+        activeFontWeight: 'normal',
+        activeFontStyle: 'normal',
+        activeTextDecoration: 'none',
+        activeTextAlign: 'left',
+        lastClickTime: 0,
+        clickCount: 0,
+        lastClickPos: null,
+        originalLayers: [],
+        originalBox: null,
+        didErase: false,
+        tempLayer: null,
+        panX: 0,
+        panY: 0,
+        zoom: 1.0,
+        isPanning: false,
+        panStartPos: { x: 0, y: 0 },
+        rotationStartAngle: 0,
+        groupPivot: null,
+        groupRotation: 0,
+        snapPoint: null,
+        lastBrushTime: 0,
+        lastBrushPoint: null,
+        smoothingAmount: 2,
+        shapeRecognitionTimer: null,
+        shapeWasJustRecognized: false,
+        eraserTrailNodes: [],
+        eraserAnimationId: null,
+        lastEraserPos: { x: 0, y: 0 },
+        isEditingText: false,
+        layersToErase: new Set(),
+        isMultiTouching: false,
+        multiTouchState: {},
+        mobileShapeState: 'idle',
+        mobileFirstPoint: null,
+        mobileDragAnchor: null,
+        justCreatedText: false,
+        // --- НАЧАЛО ИЗМЕНЕНИЙ: Добавляем свойства для Spen ---
+        toolBeforeSpenEraser: null,
+        isSpenEraserActive: false,
+        // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+        snappingMode: 'auto', // 'manual' or 'auto'
+        // --- НАЧАЛО ИЗМЕНЕНИЙ: Добавляем свойство для хранения смещения примагничивания ---
+        persistentSnapOffset: { x: 0, y: 0 },
+        // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+    };
+}
+// --- END OF FILE js/state.js ---
