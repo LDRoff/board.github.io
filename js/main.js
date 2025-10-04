@@ -659,7 +659,7 @@ document.addEventListener('DOMContentLoaded', () => {
         function loadSettings() { 
             const savedTheme = localStorage.getItem('boardTheme') || 'light'; 
             const savedStyle = localStorage.getItem('boardBackgroundStyle') || 'dot'; 
-            const savedSnapping = localStorage.getItem('boardSnappingMode') || 'manual';
+            const savedSnapping = localStorage.getItem('boardSnappingMode') || 'auto';
             const savedSmoothing = localStorage.getItem('boardSmoothing') || '2';
             const savedTransparency = localStorage.getItem('boardTransparencyDisabled') === 'true';
             const savedAnimations = localStorage.getItem('boardAnimationsDisabled') === 'true';
@@ -744,4 +744,5 @@ document.addEventListener('DOMContentLoaded', () => {
         
         loadSettings();
     }
+
 });
