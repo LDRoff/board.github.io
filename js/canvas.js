@@ -24,7 +24,7 @@ export function initializeCanvas(canvas, interactionCanvas, ctx, redrawCallback,
     state.showCreationTooltip = ui.showCreationTooltip;
     state.hideCreationTooltip = ui.hideCreationTooltip;
     state.updateTextEditorStyle = textTool.updateEditorStyle;
-    state.updateTextEditorTransform = textTool.updateEditorTransform;
+    state.updateTextEditorTransform = textTool.updateTextEditorTransform;
     state.performZoom = performZoom.bind(null, state, callbacks);
 
     const hideContextMenu = ui.setupContextMenu(state, callbacks);
@@ -94,10 +94,32 @@ export function initializeCanvas(canvas, interactionCanvas, ctx, redrawCallback,
         }
     });
 
-    canvas.addEventListener('dragover', (e) => e.preventDefault());
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Улучшенные обработчики drag-and-drop с обратной связью ---
+    canvas.addEventListener('dragenter', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        document.body.classList.add('drag-over');
+    });
+
+    canvas.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // Убираем подсветку, только если курсор покинул окно браузера, а не дочерний элемент
+        if (e.relatedTarget === null) {
+            document.body.classList.remove('drag-over');
+        }
+    });
+
+    canvas.addEventListener('dragover', (e) => {
+        e.preventDefault(); 
+        e.stopPropagation();
+    });
     
     canvas.addEventListener('drop', (e) => { 
         e.preventDefault(); 
+        e.stopPropagation();
+        document.body.classList.remove('drag-over'); // Убираем подсветку после сброса
+
         const pos = utils.getMousePos(e, state); 
         if (e.dataTransfer.files.length > 0) {
             const file = e.dataTransfer.files[0];
@@ -108,6 +130,7 @@ export function initializeCanvas(canvas, interactionCanvas, ctx, redrawCallback,
             }
         }
     });
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
     
     canvas.addEventListener('contextmenu', (e) => {
         e.preventDefault();
