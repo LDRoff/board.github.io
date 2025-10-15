@@ -120,3 +120,38 @@ body.no-transparency::after {
 @media (max-width: 480px) {
     body, html { font-size: 14px; }
 }
+
+/* --- НАЧАЛО ИЗМЕНЕНИЙ: Стили для Drag-and-Drop --- */
+body::before {
+    /* Добавляем transition, чтобы фон плавно появлялся */
+    transition: opacity 0.3s ease;
+}
+
+body.drag-over::before {
+    content: 'Перетащите файл сюда';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 24px;
+    font-weight: bold;
+    color: var(--accent-color);
+    background-color: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(5px);
+    border: 3px dashed var(--accent-color);
+    box-sizing: border-box;
+    z-index: 9998;
+    pointer-events: none; /* Важно, чтобы не перехватывать события */
+    opacity: 1;
+}
+
+body.dark-theme.drag-over::before {
+    color: #87bfff;
+    background-color: rgba(26, 35, 55, 0.8);
+    border-color: #87bfff;
+}
+/* --- КОНЕЦ ИЗМЕНЕНИЙ --- */
