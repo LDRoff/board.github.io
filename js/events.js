@@ -73,9 +73,9 @@ export async function copySelectionToClipboard(canvasState, cut = false) {
 }
 
 export async function pasteFromClipboard(canvasState) {
+    // Эта функция теперь в основном для API-доступа и вставки внутренних объектов.
     if (!navigator.clipboard || !navigator.clipboard.read) {
         console.warn('Clipboard API не поддерживается или недоступен в этом контексте (требуется HTTPS).');
-        alert('Функция вставки недоступна в вашем браузере (требуется HTTPS).');
         return;
     }
 
@@ -84,6 +84,7 @@ export async function pasteFromClipboard(canvasState) {
         let contentPasted = false;
 
         for (const item of clipboardItems) {
+            // Приоритет на внутренний формат
             if (item.types.includes(CUSTOM_MIME_TYPE)) {
                 const blob = await item.getType(CUSTOM_MIME_TYPE);
                 const json = await blob.text();
@@ -92,7 +93,7 @@ export async function pasteFromClipboard(canvasState) {
                 const offset = 20 / canvasState.zoom;
                 layersToPaste.forEach(layer => {
                     layer.id = Date.now() + Math.random();
-
+                    // ... (код смещения объектов, без изменений)
                     if (layer.x !== undefined) { layer.x += offset; layer.y += offset; }
                     if (layer.cx !== undefined) { layer.cx += offset; layer.cy += offset; }
                     if (layer.x1 !== undefined) { layer.x1 += offset; layer.y1 += offset; layer.x2 += offset; layer.y2 += offset; }
@@ -126,26 +127,27 @@ export async function pasteFromClipboard(canvasState) {
                 canvasState.redraw();
                 canvasState.updateFloatingToolbar();
                 contentPasted = true;
-                break; 
+                return; // Выходим, так как внутренний формат важнее
             }
         }
 
-        if (!contentPasted) {
-            for (const item of clipboardItems) {
-                const imageType = item.types.find(type => type.startsWith('image/'));
-                if (imageType) {
-                    const blob = await item.getType(imageType);
-                    const centerPos = {
-                        x: (canvasState.canvas.width / 2 - canvasState.panX) / canvasState.zoom,
-                        y: (canvasState.canvas.height / 2 - canvasState.panY) / canvasState.zoom
-                    };
-                    utils.processImageFile(new File([blob], "pasted_image.png", { type: blob.type }), centerPos, canvasState, canvasState.redraw, canvasState.saveState);
-                    break; 
-                }
+        // Если внутреннего формата нет, ищем изображение
+        for (const item of clipboardItems) {
+            const imageType = item.types.find(type => type.startsWith('image/'));
+            if (imageType) {
+                const blob = await item.getType(imageType);
+                const centerPos = {
+                    x: (canvasState.canvas.width / 2 - canvasState.panX) / canvasState.zoom,
+                    y: (canvasState.canvas.height / 2 - canvasState.panY) / canvasState.zoom
+                };
+                // Передаем как File, чтобы унифицировать обработку
+                utils.processImageFile(new File([blob], "pasted_image.png", { type: blob.type }), centerPos, canvasState, canvasState.redraw, handlers.performSaveState);
+                contentPasted = true;
+                break; 
             }
         }
     } catch (err) {
-        console.error('Не удалось вставить из буфера обмена:', err);
+        console.error('Не удалось вставить через Clipboard API:', err);
     }
 }
 
@@ -175,10 +177,11 @@ export function initializeEventListeners(canvasState, handlers) {
                     copySelectionToClipboard(canvasState, true);
                     break;
                 case 'KeyV':
+                    // Предотвращаем стандартное поведение браузера
                     e.preventDefault();
-                    // Мы делегируем обработку события 'paste', а не вызываем функцию напрямую,
-                    // чтобы использовать более надежный механизм события.
-                    window.dispatchEvent(new Event('paste'));
+                    // Мы не вызываем функцию напрямую, а позволяем сработать
+                    // глобальному обработчику 'paste' для максимальной совместимости.
+                    // Браузер сам вызовет 'paste' после нажатия Ctrl+V.
                     break;
             }
             return;
@@ -293,55 +296,49 @@ export function initializeEventListeners(canvasState, handlers) {
         }
     });
 
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Новый универсальный обработчик вставки ---
     window.addEventListener('paste', async (e) => {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+        if (document.querySelector('input:focus, textarea:focus')) {
             return;
         }
         e.preventDefault();
-    
+
         let contentPasted = false;
-        
-        // --- НАЧАЛО ИЗМЕНЕНИЙ: Улучшенная логика вставки ---
-        // Приоритет 1: Проверяем clipboardData.files. Это самый надежный способ для мобильных устройств.
-        if (e.clipboardData?.files && e.clipboardData.files.length > 0) {
-            const file = Array.from(e.clipboardData.files).find(f => f.type.startsWith('image/'));
-            if (file) {
-                const centerPos = {
-                    x: (canvasState.canvas.width / 2 - canvasState.panX) / canvasState.zoom,
-                    y: (canvasState.canvas.height / 2 - canvasState.panY) / canvasState.zoom
-                };
-                utils.processImageFile(file, centerPos, canvasState, handlers.redraw, handlers.performSaveState);
+        const centerPos = {
+            x: (canvasState.canvas.width / 2 - canvasState.panX) / canvasState.zoom,
+            y: (canvasState.canvas.height / 2 - canvasState.panY) / canvasState.zoom
+        };
+
+        // Приоритет 1: Прямой доступ к файлам в буфере обмена (лучший способ для мобильных).
+        if (e.clipboardData?.files?.length > 0) {
+            const imageFile = Array.from(e.clipboardData.files).find(file => file.type.startsWith('image/'));
+            if (imageFile) {
+                utils.processImageFile(imageFile, centerPos, canvasState, handlers.redraw, handlers.performSaveState);
                 contentPasted = true;
             }
         }
-    
-        // Приоритет 2 (Fallback): Если в .files ничего нет, проверяем .items.
-        // Это может сработать для некоторых случаев на десктопе, например, при копировании из редакторов.
+
+        // Приоритет 2: Проверка `items`, если `.files` пусто (альтернативный способ).
         if (!contentPasted && e.clipboardData?.items) {
             for (const item of e.clipboardData.items) {
                 if (item.kind === 'file' && item.type.startsWith('image/')) {
-                    const file = item.getAsFile();
-                    if (file) {
-                        const centerPos = {
-                            x: (canvasState.canvas.width / 2 - canvasState.panX) / canvasState.zoom,
-                            y: (canvasState.canvas.height / 2 - canvasState.panY) / canvasState.zoom
-                        };
-                        utils.processImageFile(file, centerPos, canvasState, handlers.redraw, handlers.performSaveState);
+                    const imageFile = item.getAsFile();
+                    if (imageFile) {
+                        utils.processImageFile(imageFile, centerPos, canvasState, handlers.redraw, handlers.performSaveState);
                         contentPasted = true;
                         break;
                     }
                 }
             }
         }
-        // --- КОНЕЦ ИЗМЕНЕНИЙ ---
-    
-        // Приоритет 3 (Fallback): Если ни один из способов не сработал,
-        // вызываем нашу функцию с Clipboard API для вставки внутренних объектов.
+        
+        // Приоритет 3: Если ничего не найдено, используем Clipboard API.
+        // Это нужно для вставки внутренних объектов приложения и как последний шанс для изображений на ПК.
         if (!contentPasted) {
-            pasteFromClipboard(canvasState);
+            await pasteFromClipboard(canvasState);
         }
     });
-
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
     // --- Resize Event ---
     window.addEventListener('resize', () => {
