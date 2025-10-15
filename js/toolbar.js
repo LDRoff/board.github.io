@@ -141,7 +141,9 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
         } else if (target.id === 'addPdfMenuBtn') {
             document.getElementById('pdfUpload').click();
         } else if (target.id === 'pasteFromClipboardBtn') {
-            pasteFromClipboard(canvasState);
+            // --- НАЧАЛО ИЗМЕНЕНИЙ: Вызываем pasteFromClipboard с нужными аргументами ---
+            pasteFromClipboard(canvasState, handlers);
+            // --- КОНЕЦ ИЗМЕНЕНИЙ ---
         }
         addFileToolContainer.classList.remove('active');
     });
