@@ -151,7 +151,7 @@ export function initializeFileHandlers(canvasState, loadState, redrawCallback, s
         e.stopPropagation();
     });
     
-    dropZone.addEventListener('drop', (e) => { 
+    dropZone.addEventListener('drop', async (e) => { 
         e.preventDefault(); 
         e.stopPropagation();
         document.body.classList.remove('drag-over');
