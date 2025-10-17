@@ -1,3 +1,5 @@
+// --- START OF FILE js/pointerHandlers.js ---
+
 import * as geo from './geometry.js';
 import * as hitTest from './hitTest.js';
 import * as actions from './actions.js';
@@ -524,6 +526,7 @@ export function draw(state, callbacks, e) {
         }
         else if (state.isDrawing) {
             if (state.activeTool === 'brush' || state.activeTool === 'smart-brush') {
+                // --- НАЧАЛО ИЗМЕНЕНИЙ: Оптимизация рендеринга кисти ---
                 const point = { ...pos };
                 if (e.pointerType === 'pen') {
                     const rawPressure = e.pressure > 0 ? e.pressure : 0.5;
@@ -531,22 +534,31 @@ export function draw(state, callbacks, e) {
                 }
                 state.tempLayer.points.push(point);
 
-                const iCtx = state.iCtx;
-                iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
-                
-                iCtx.save();
-                iCtx.translate(state.panX, state.panY);
-                iCtx.scale(state.zoom, state.zoom);
-
-                drawLayer(iCtx, state.tempLayer, state);
-                
-                iCtx.restore();
+                if (!state.redrawPending) {
+                    state.redrawPending = true;
+                    requestAnimationFrame(() => {
+                        const iCtx = state.iCtx;
+                        iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
+                        iCtx.save();
+                        iCtx.translate(state.panX, state.panY);
+                        iCtx.scale(state.zoom, state.zoom);
+                        
+                        if (state.tempLayer) {
+                            drawLayer(iCtx, state.tempLayer, state);
+                        }
+                        
+                        iCtx.restore();
+                        state.redrawPending = false;
+                    });
+                }
+                // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
                 state.lastBrushPoint = pos;
 
                 if (state.activeTool === 'smart-brush') {
                     clearTimeout(state.shapeRecognitionTimer);
                     state.shapeRecognitionTimer = setTimeout(() => {
+                        if (!state.isDrawing || !state.tempLayer) return; // Доп. проверка
                         const recognizedShape = shapeRecognizer.recognizeShape(state.tempLayer.points);
                         if (recognizedShape) {
                             state.layers.push({
@@ -926,3 +938,4 @@ export function stopDrawing(state, callbacks, e) {
     }
     redrawCallback();
 }
+// --- END OF FILE js/pointerHandlers.js ---
