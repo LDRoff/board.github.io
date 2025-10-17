@@ -44,7 +44,7 @@ export function initializeCanvas(canvas, interactionCanvas, ctx, redrawCallback,
     canvas.addEventListener('touchmove', onTouchMove, { passive: false });
     canvas.addEventListener('touchend', onTouchEnd);
 
-    const handlePointerEndOutside = () => {
+    const handlePointerEndOutside = (e) => {
         if (state.isSpenEraserActive) {
             // Если мы что-то стерли, применяем изменения
             if (state.isDrawing && state.didErase) {
@@ -75,7 +75,15 @@ export function initializeCanvas(canvas, interactionCanvas, ctx, redrawCallback,
             state.isPanning = false; 
             document.removeEventListener('pointermove', state.onPointerMove);
             document.removeEventListener('pointerup', state.onPointerUp);
-        } 
+        }
+        
+        // --- НАЧАЛО ИЗМЕНЕНИЙ: Корректно завершаем рисование, если указатель покинул холст ---
+        if (state.isDrawing) {
+            // Создаем простое событие, чтобы передать его в функцию завершения рисования
+            const fakeEvent = new PointerEvent('pointerup', e);
+            pointer.stopDrawing(state, callbacks, fakeEvent);
+        }
+        // --- КОНЕЦ ИЗМЕНЕНИЙ ---
     };
 
     canvas.addEventListener('pointerleave', handlePointerEndOutside);
