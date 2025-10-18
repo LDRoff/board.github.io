@@ -1,4 +1,8 @@
-import { getBoundingBox, getGroupBoundingBox, getGroupLogicalBoundingBox, rotatePoint } from './geometry.js';
+// --- START OF FILE js/renderer.js ---
+
+// --- НАЧАЛО ИЗМЕНЕНИЙ: Импортируем необходимые функции ---
+import { getBoundingBox, getGroupBoundingBox, getGroupLogicalBoundingBox, rotatePoint, getTransformedBoundingBox, doBoxesIntersect } from './geometry.js';
+// --- КОНЕЦ ИЗМЕНЕНИЙ ---
 import { getSelectionRotation } from './hitTest.js';
 
 function drawWavyPath(ctx, points, closed = false) {
@@ -658,17 +662,27 @@ export function redrawCanvas(canvasState) {
     
     const selectedIds = new Set(selectedLayers.map(l => l.id));
 
-    // 1. Рисуем все невыделенные и нестираемые слои
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Оптимизация отрисовки ---
+    const viewport = {
+        x: -canvasState.panX / canvasState.zoom,
+        y: -canvasState.panY / canvasState.zoom,
+        width: canvasState.canvas.width / canvasState.zoom,
+        height: canvasState.canvas.height / canvasState.zoom
+    };
+
+    // 1. Рисуем все невыделенные и нестираемые слои, которые видны на экране
     layers.forEach(layer => {
         if (!selectedIds.has(layer.id) && !layersToErase.has(layer)) {
-            drawLayer(ctx, layer, canvasState);
+            const layerBox = getTransformedBoundingBox(layer);
+            if (layerBox && doBoxesIntersect(viewport, layerBox)) {
+                drawLayer(ctx, layer, canvasState);
+            }
         }
     });
 
-    // 2. Рисуем выделенные слои, применяя к ним общую трансформацию группы, если она есть
+    // 2. Рисуем выделенные слои, которые видны на экране
     if (selectedLayers.length > 0) {
         ctx.save();
-        // Применяем вращение группы только если выделено больше одного объекта
         if (selectedLayers.length > 1 && groupRotation && groupPivot) {
             ctx.translate(groupPivot.x, groupPivot.y);
             ctx.rotate(groupRotation);
@@ -677,15 +691,16 @@ export function redrawCanvas(canvasState) {
         
         selectedLayers.forEach(layer => {
             if (!layersToErase.has(layer)) {
-                drawLayer(ctx, layer, canvasState);
+                // Повторяем проверку видимости и для выделенных слоев
+                const layerBox = getTransformedBoundingBox(layer);
+                 if (layerBox && doBoxesIntersect(viewport, layerBox)) {
+                    drawLayer(ctx, layer, canvasState);
+                }
             }
         });
         
         ctx.restore();
     }
-
-    // --- НАЧАЛО ИЗМЕНЕНИЙ: Убираем отрисовку временного слоя с основного холста ---
-    // Временные слои теперь рисуются только на interactionCanvas для лучшей производительности.
     // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
     // 3. Рисуем рамку выделения поверх всего
@@ -709,3 +724,4 @@ export function drawBackground(bgCanvas, canvasState) {
     if (style === 'dot') { bgCtx.fillStyle = color; for (let x = startX; x < bgCanvas.width; x += visualSpacing) { for (let y = startY; y < bgCanvas.height; y += visualSpacing) { bgCtx.beginPath(); bgCtx.arc(x, y, 1, 0, 2 * Math.PI, false); bgCtx.fill(); } } } 
     else { bgCtx.strokeStyle = color; bgCtx.lineWidth = 0.5; for (let x = startX; x < bgCanvas.width; x += visualSpacing) { bgCtx.beginPath(); bgCtx.moveTo(x, 0); bgCtx.lineTo(x, bgCanvas.height); bgCtx.stroke(); } for (let y = startY; y < bgCanvas.height; y += visualSpacing) { bgCtx.beginPath(); bgCtx.moveTo(0, y); bgCtx.lineTo(bgCanvas.width, y); bgCtx.stroke(); } }
 }
+// --- END OF FILE js/renderer.js ---
