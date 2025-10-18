@@ -1,5 +1,3 @@
-// --- START OF FILE js/pointerHandlers.js ---
-
 import * as geo from './geometry.js';
 import * as hitTest from './hitTest.js';
 import * as actions from './actions.js';
@@ -525,8 +523,8 @@ export function draw(state, callbacks, e) {
             tools.handleShapeDrawing(state.iCtx, state, pos, e);
         }
         else if (state.isDrawing) {
+            // --- НАЧАЛО ИЗМЕНЕНИЙ: Оптимизация производительности рисования ---
             if (state.activeTool === 'brush' || state.activeTool === 'smart-brush') {
-                // --- НАЧАЛО ИЗМЕНЕНИЙ: Оптимизация рендеринга кисти ---
                 const point = { ...pos };
                 if (e.pointerType === 'pen') {
                     const rawPressure = e.pressure > 0 ? e.pressure : 0.5;
@@ -534,31 +532,31 @@ export function draw(state, callbacks, e) {
                 }
                 state.tempLayer.points.push(point);
 
-                if (!state.redrawPending) {
-                    state.redrawPending = true;
-                    requestAnimationFrame(() => {
-                        const iCtx = state.iCtx;
-                        iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
-                        iCtx.save();
-                        iCtx.translate(state.panX, state.panY);
-                        iCtx.scale(state.zoom, state.zoom);
-                        
-                        if (state.tempLayer) {
-                            drawLayer(iCtx, state.tempLayer, state);
-                        }
-                        
-                        iCtx.restore();
-                        state.redrawPending = false;
-                    });
-                }
-                // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+                const iCtx = state.iCtx;
+                iCtx.save();
+                iCtx.translate(state.panX, state.panY);
+                iCtx.scale(state.zoom, state.zoom);
+                
+                iCtx.strokeStyle = state.tempLayer.color;
+                iCtx.lineCap = 'round';
+                iCtx.lineJoin = 'round';
 
-                state.lastBrushPoint = pos;
+                const pressure = point.pressure || 0.5;
+                iCtx.lineWidth = Math.max(0.5, state.tempLayer.lineWidth * pressure);
+                
+                iCtx.beginPath();
+                iCtx.moveTo(state.lastBrushPoint.x, state.lastBrushPoint.y);
+                iCtx.lineTo(point.x, point.y);
+                iCtx.stroke();
+                
+                iCtx.restore();
+
+                state.lastBrushPoint = point;
 
                 if (state.activeTool === 'smart-brush') {
                     clearTimeout(state.shapeRecognitionTimer);
                     state.shapeRecognitionTimer = setTimeout(() => {
-                        if (!state.isDrawing || !state.tempLayer) return; // Доп. проверка
+                        if (!state.isDrawing) return; // Не распознавать, если уже закончили рисовать
                         const recognizedShape = shapeRecognizer.recognizeShape(state.tempLayer.points);
                         if (recognizedShape) {
                             state.layers.push({
@@ -576,6 +574,7 @@ export function draw(state, callbacks, e) {
                         }
                     }, 500);
                 }
+            // --- КОНЕЦ ИЗМЕНЕНИЙ ---
             } else if (state.activeTool === 'eraser') {
                 if (!document.body.classList.contains('no-animations')) {
                     state.lastEraserPos = pos;
@@ -938,4 +937,3 @@ export function stopDrawing(state, callbacks, e) {
     }
     redrawCallback();
 }
-// --- END OF FILE js/pointerHandlers.js ---
