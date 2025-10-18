@@ -857,6 +857,7 @@ export function stopDrawing(state, callbacks, e) {
         
         if (state.activeTool === 'line' && e.shiftKey) { /* ... */ }
 
+        // --- НАЧАЛО ИЗМЕНЕНИЙ: Оптимизация для кисти ---
         if (state.activeTool === 'brush' || state.activeTool === 'smart-brush') {
             const newLayer = state.tempLayer;
             if (newLayer && newLayer.points.length > 1) {
@@ -865,24 +866,35 @@ export function stopDrawing(state, callbacks, e) {
                     newLayer.points = utils.simplifyPath(newLayer.points, tolerance);
                 }
                 
+                let finalLayer;
                 if (state.activeTool === 'smart-brush' && !state.shapeWasJustRecognized) {
                     const recognizedShape = shapeRecognizer.recognizeShape(newLayer.points);
                     if (recognizedShape) {
-                        state.layers.push({ 
+                        finalLayer = { 
                             ...recognizedShape, 
                             color: newLayer.color, 
                             lineWidth: newLayer.lineWidth,
                             lineStyle: newLayer.lineStyle
-                        });
+                        };
                     } else {
-                       state.layers.push(newLayer); 
+                       finalLayer = newLayer; 
                     }
                 } else {
-                    state.layers.push(newLayer);
+                    finalLayer = newLayer;
                 }
+                state.layers.push(finalLayer);
+                saveState(state.layers);
+
+                // Инкрементальная отрисовка вместо полной
+                const ctx = state.ctx;
+                ctx.save();
+                ctx.translate(state.panX, state.panY);
+                ctx.scale(state.zoom, state.zoom);
+                drawLayer(ctx, finalLayer, state);
+                ctx.restore();
             }
-            saveState(state.layers);
         } 
+        // --- КОНЕЦ ИЗМЕНЕНИЙ ---
         else if (state.activeTool === 'eraser') { 
             if (state.didErase) {
                 const idsToErase = new Set(Array.from(state.layersToErase).map(l => l.id));
@@ -890,6 +902,7 @@ export function stopDrawing(state, callbacks, e) {
                 state.layersToErase.clear();
                 saveState(state.layers);
             }
+            redrawCallback(); // Для ластика нужна полная перерисовка
         } else {
             const commonProps = { color: state.activeColor, lineWidth: state.activeLineWidth, id: Date.now(), rotation: 0, pivot: { x: 0, y: 0 }, lineStyle: state.activeLineStyle };
             switch(state.activeTool) {
@@ -900,7 +913,10 @@ export function stopDrawing(state, callbacks, e) {
                 case 'line': { const line = { type: 'line', x1: finalStart.x, y1: finalStart.y, x2: finalEnd.x, y2: finalEnd.y, ...commonProps }; if (Math.abs(line.x1 - line.x2) > 5 || Math.abs(line.y1 - line.y2) > 5) state.layers.push(line); break; }
             }
             saveState(state.layers);
+            redrawCallback(); // Для фигур нужна полная перерисовка
         }
+    } else {
+      redrawCallback(); // Добавляем перерисовку для случаев, когда isDrawing = false
     }
     
     updateCursor(state, null);
@@ -924,5 +940,5 @@ export function stopDrawing(state, callbacks, e) {
     if (state.hideCreationTooltip) {
         state.hideCreationTooltip();
     }
-    redrawCallback();
+    // Убираем финальный redrawCallback, так как он теперь обрабатывается внутри каждого блока if/else
 }
