@@ -647,9 +647,7 @@ export function stopDrawing(state, callbacks, e) {
 
     if (state.isMultiTouching) return;
 
-    // --- НАЧАЛО ИЗМЕНЕНИЙ: Получаем debouncedSaveState из callbacks ---
     const { redrawCallback, saveState, updateToolbarCallback, debouncedSaveState } = callbacks;
-    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
     
     if (checkAndHandleSpenEraser(state, e, callbacks)) {
         state.isDrawing = false;
@@ -850,15 +848,6 @@ export function stopDrawing(state, callbacks, e) {
     clearTimeout(state.shapeRecognitionTimer);
     
     if (state.isDrawing) {
-        const rawEnd = utils.getMousePos(e, state);
-        let finalStart = state.startPos;
-        let finalEnd = rawEnd;
-
-        const shouldSnap = (state.snappingMode === 'manual' && e.altKey) || (state.snappingMode === 'auto' && !e.altKey);
-        if (shouldSnap) { /* ... */ }
-        
-        if (state.activeTool === 'line' && e.shiftKey) { /* ... */ }
-
         if (state.activeTool === 'brush' || state.activeTool === 'smart-brush') {
             const newLayer = state.tempLayer;
             if (newLayer && newLayer.points.length > 1) {
@@ -884,9 +873,7 @@ export function stopDrawing(state, callbacks, e) {
                     finalLayer = newLayer;
                 }
                 state.layers.push(finalLayer);
-                // --- НАЧАЛО ИЗМЕНЕНИЙ: Используем отложенное сохранение ---
                 debouncedSaveState(state.layers);
-                // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
                 const ctx = state.ctx;
                 ctx.save();
@@ -895,8 +882,24 @@ export function stopDrawing(state, callbacks, e) {
                 drawLayer(ctx, finalLayer, state);
                 ctx.restore();
             }
+            // --- НАЧАЛО ИЗМЕНЕНИЙ: Завершаем выполнение функции здесь, чтобы избежать полной перерисовки ---
+            state.isDrawing = false;
+            state.currentAction = 'none';
+            state.tempLayer = null;
+            return;
+            // --- КОНЕЦ ИЗМЕНЕНИЙ ---
         } 
-        else if (state.activeTool === 'eraser') { 
+        
+        const rawEnd = utils.getMousePos(e, state);
+        let finalStart = state.startPos;
+        let finalEnd = rawEnd;
+
+        const shouldSnap = (state.snappingMode === 'manual' && e.altKey) || (state.snappingMode === 'auto' && !e.altKey);
+        if (shouldSnap) { /* ... */ }
+        
+        if (state.activeTool === 'line' && e.shiftKey) { /* ... */ }
+
+        if (state.activeTool === 'eraser') { 
             if (state.didErase) {
                 const idsToErase = new Set(Array.from(state.layersToErase).map(l => l.id));
                 state.layers = state.layers.filter(layer => !idsToErase.has(layer.id));
@@ -916,7 +919,7 @@ export function stopDrawing(state, callbacks, e) {
             saveState(state.layers);
             redrawCallback();
         }
-    } else if (state.currentAction !== 'selectionBox') { // Добавляем проверку, чтобы не было лишней перерисовки
+    } else if (state.currentAction !== 'selectionBox') { 
       redrawCallback(); 
     }
     
