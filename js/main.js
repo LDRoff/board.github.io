@@ -8,7 +8,10 @@ import { redrawCanvas, drawBackground } from './renderer.js';
 import * as history from './history.js';
 import { initializeEventListeners, copySelectionToClipboard, pasteFromClipboard } from './events.js';
 import { initializeFileHandlers } from './file.js';
+// --- НАЧАЛО ИЗМЕНЕНИЙ: Импортируем кэш и rehydrate ---
 import * as utils from './utils.js';
+import { mediaCache } from './utils.js';
+// --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
 document.addEventListener('DOMContentLoaded', () => {
     const loader = document.getElementById('loader-overlay'); 
@@ -20,7 +23,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const redoBtn = document.getElementById('redoBtn');
     let canvasState;
 
-    // --- НАЧАЛО ИЗМЕНЕНИЙ: Добавляем таймеры для отложенного сохранения ---
     let saveStateTimer = null;
     let saveViewStateTimer = null;
 
@@ -28,9 +30,8 @@ document.addEventListener('DOMContentLoaded', () => {
         clearTimeout(saveStateTimer);
         saveStateTimer = setTimeout(() => {
             performSaveState(layers, addToHistory);
-        }, 500); // Задержка в 500 мс
+        }, 500); 
     }
-    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
     function debouncedSaveViewState() {
         clearTimeout(saveViewStateTimer);
@@ -51,10 +52,16 @@ document.addEventListener('DOMContentLoaded', () => {
         updateUndoRedoButtons();
     }
 
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Переписываем Undo/Redo для использования кэша ---
     async function performUndo() {
-        const cleanLayers = history.undo();
-        if (cleanLayers) {
-            canvasState.layers = await utils.rehydrateLayers(cleanLayers);
+        const lightweightLayers = history.undo();
+        if (lightweightLayers) {
+            lightweightLayers.forEach(layer => {
+                if (mediaCache[layer.id]) {
+                    Object.assign(layer, mediaCache[layer.id]);
+                }
+            });
+            canvasState.layers = lightweightLayers;
             canvasState.selectedLayers = [];
             redraw();
             updateUndoRedoButtons();
@@ -62,14 +69,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function performRedo() {
-        const cleanLayers = history.redo();
-        if (cleanLayers) {
-            canvasState.layers = await utils.rehydrateLayers(cleanLayers);
+        const lightweightLayers = history.redo();
+        if (lightweightLayers) {
+            lightweightLayers.forEach(layer => {
+                if (mediaCache[layer.id]) {
+                    Object.assign(layer, mediaCache[layer.id]);
+                }
+            });
+            canvasState.layers = lightweightLayers;
             canvasState.selectedLayers = [];
             redraw();
             updateUndoRedoButtons();
         }
     }
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
     function performDeleteSelected() {
         if (canvasState.selectedLayers.length > 0) {
@@ -243,9 +256,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeFloatingPdfToolbar();
     initializeFloatingCurveToolbar();
 
-    // --- НАЧАЛО ИЗМЕНЕНИЙ: Передаем debouncedSaveState в canvas ---
-    canvasState = initializeCanvas(drawingCanvas, interactionCanvas, ctx, redraw, performSaveState, updateSubToolbarVisibility, debouncedSaveViewState, debouncedSaveState);
-    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+    canvasState = initializeCanvas(drawingCanvas, interactionCanvas, ctx, redraw, performSaveState, updateToolbarCallback, debouncedSaveViewState, debouncedSaveState);
     history.initHistory(canvasState);
     canvasState.redraw = redraw;
 
