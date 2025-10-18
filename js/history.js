@@ -34,9 +34,11 @@ export function saveState(layers, addToHistory = true) {
         if (historyIndex < history.length - 1) {
             history.splice(historyIndex + 1);
         }
-        if (history.length > 50) {
+        // --- НАЧАЛО ИЗМЕНЕНИЙ: Уменьшаем лимит истории до 20 ---
+        if (history.length > 20) {
             history.shift();
         }
+        // --- КОНЕЦ ИЗМЕНЕНИЙ ---
         // В историю кладем уже очищенную и безопасную копию
         history.push(cloneLayers(layers));
         historyIndex = history.length - 1;
