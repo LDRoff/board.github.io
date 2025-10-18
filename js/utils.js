@@ -2,6 +2,10 @@
 
 import { getBoundingBox, rotatePoint } from './geometry.js';
 
+// --- НАЧАЛО ИЗМЕНЕНИЙ: Создаем кэш для медиа-данных ---
+export const mediaCache = {};
+// --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
 const GRID_SPACING = 20;
 
 /**
@@ -52,11 +56,13 @@ export async function rehydrateLayers(layers) {
                 const img = new Image();
                 img.onload = () => {
                     layer.image = img;
+                    // --- НАЧАЛО ИЗМЕНЕНИЙ: Кэшируем загруженный ресурс ---
+                    mediaCache[layer.id] = { image: img, src: layer.src };
+                    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
                     resolve();
                 };
                 img.onerror = () => {
                     console.error(`Не удалось загрузить изображение: ${layer.src}`);
-                    // Разрешаем промис даже при ошибке, чтобы не блокировать всю загрузку
                     resolve(); 
                 };
                 img.src = layer.src;
@@ -76,16 +82,19 @@ export async function rehydrateLayers(layers) {
                     
                     layer.pdfDoc = pdfDoc;
                     layer.renderedPages = new Map();
+                    // --- НАЧАЛО ИЗМЕНЕНИЙ: Кэшируем загруженный ресурс ---
+                    mediaCache[layer.id] = { pdfDoc, renderedPages: layer.renderedPages, fileData: layer.fileData };
+                    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
                     await renderPdfPageToCanvas(layer, layer.currentPage);
                     
                 } catch (err) {
                     console.error("Не удалось загрузить PDF слой:", err);
                 } finally {
-                    resolve(); // Всегда разрешаем промис
+                    resolve(); 
                 }
             });
         }
-        return Promise.resolve(); // Возвращаем разрешенный промис для слоев без ресурсов
+        return Promise.resolve(); 
     });
 
     await Promise.all(loadPromises);
@@ -102,10 +111,8 @@ export function serializeLayers(layers) {
         const newLayer = { ...layer };
 
         if (layer.type === 'image' && layer.image instanceof HTMLImageElement) {
-            // Оптимизация: не перекодируем, если уже есть data URL
             if (!newLayer.src || !newLayer.src.startsWith('data:')) {
                 const tempCanvas = document.createElement('canvas');
-                // Важная проверка: убеждаемся, что изображение загружено
                 if (layer.image.naturalWidth > 0 && layer.image.naturalHeight > 0) {
                     tempCanvas.width = newLayer.image.naturalWidth;
                     tempCanvas.height = newLayer.image.naturalHeight;
@@ -215,7 +222,6 @@ export async function renderPdfPageToCanvas(layer, pageNum) {
     }
 }
 
-// --- НАЧАЛО ИЗМЕНЕНИЙ ---
 export function processImageFile(file, position, canvasState, redrawCallback, saveState) {
     if (!file.type.startsWith('image/')) return;
 
@@ -251,7 +257,7 @@ export function processImageFile(file, position, canvasState, redrawCallback, sa
                 const newLayer = { 
                     type: 'image', 
                     image: finalImg,
-                    src: finalSrc, // Сохраняем сжатый src для сериализации
+                    src: finalSrc, 
                     x: position.x - finalImg.width / 2, 
                     y: position.y - finalImg.height / 2, 
                     width: finalImg.width, 
@@ -260,6 +266,10 @@ export function processImageFile(file, position, canvasState, redrawCallback, sa
                     rotation: 0, 
                     pivot: { x: 0, y: 0 } 
                 };
+
+                // --- НАЧАЛО ИЗМЕНЕНИЙ: Кэшируем ресурс при создании ---
+                mediaCache[newLayer.id] = { image: finalImg, src: finalSrc };
+                // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
                 canvasState.layers.push(newLayer);
                 canvasState.selectedLayers = [newLayer];
@@ -281,7 +291,6 @@ export function processImageFile(file, position, canvasState, redrawCallback, sa
     };
     reader.readAsDataURL(file);
 }
-// --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
 export function processPdfFile(file, position, canvasState, redrawCallback, saveState) {
     if (!file.type.includes('pdf')) return;
@@ -328,6 +337,10 @@ export function processPdfFile(file, position, canvasState, redrawCallback, save
                 rotation: 0,
                 pivot: { x: 0, y: 0 }
             };
+
+            // --- НАЧАЛО ИЗМЕНЕНИЙ: Кэшируем ресурс при создании ---
+            mediaCache[newLayer.id] = { pdfDoc: newLayer.pdfDoc, renderedPages: newLayer.renderedPages, fileData: newLayer.fileData };
+            // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
             await renderPdfPageToCanvas(newLayer, 1);
 
@@ -380,14 +393,11 @@ export function applyTransformations(layer) {
     ]);
     const shouldBakeRotation = !typesThatPreserveRotation.has(layer.type) && rotation !== 0;
 
-    // Сначала применяем смещение ко всем типам слоев
     translateLayer(layer, dx, dy);
 
-    // Затем, если нужно, "запекаем" вращение в координаты точек
     if (shouldBakeRotation) {
         const rotate = (p) => rotatePoint(p, newCenter, rotation);
         
-        // Корректируем точки относительно нового центра, так как слой уже был смещен
         const correctAndRotate = (p) => {
             const correctedPoint = { x: p.x - dx, y: p.y - dy };
             return rotatePoint(correctedPoint, pivotPoint, rotation);
@@ -466,12 +476,10 @@ export function applyTransformations(layer) {
         }
     }
     
-    // Сбрасываем вращение только для тех типов, где мы его "запекли"
     if (shouldBakeRotation) {
         layer.rotation = 0;
     }
     
-    // Пивот всегда сбрасывается, так как это временное свойство для одной трансформации
     layer.pivot = { x: 0, y: 0 };
 }
 
@@ -545,12 +553,9 @@ export function smoothCurveHandles(nodes) {
         nodes[i].type = 'smooth';
     }
 
-    // У крайних точек должна быть только одна управляющая точка
     nodes[0].h2 = null;
     nodes[nodes.length - 1].h1 = null;
 
-    // Если у второго узла h2 не был изменен (случай из 2х точек),
-    // сделаем его симметричным h1 первого узла
     if (nodes.length === 2) {
         nodes[1].h2 = {
             x: nodes[1].p.x - (nodes[0].h1.x - nodes[0].p.x),
@@ -558,4 +563,3 @@ export function smoothCurveHandles(nodes) {
         };
     }
 }
-// --- END OF FILE js/utils.js ---
