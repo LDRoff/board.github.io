@@ -8,10 +8,8 @@ import { redrawCanvas, drawBackground } from './renderer.js';
 import * as history from './history.js';
 import { initializeEventListeners, copySelectionToClipboard, pasteFromClipboard } from './events.js';
 import { initializeFileHandlers } from './file.js';
-// --- НАЧАЛО ИЗМЕНЕНИЙ: Импортируем кэш и rehydrate ---
 import * as utils from './utils.js';
 import { mediaCache } from './utils.js';
-// --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
 document.addEventListener('DOMContentLoaded', () => {
     const loader = document.getElementById('loader-overlay'); 
@@ -52,7 +50,6 @@ document.addEventListener('DOMContentLoaded', () => {
         updateUndoRedoButtons();
     }
 
-    // --- НАЧАЛО ИЗМЕНЕНИЙ: Переписываем Undo/Redo для использования кэша ---
     async function performUndo() {
         const lightweightLayers = history.undo();
         if (lightweightLayers) {
@@ -82,7 +79,6 @@ document.addEventListener('DOMContentLoaded', () => {
             updateUndoRedoButtons();
         }
     }
-    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
     function performDeleteSelected() {
         if (canvasState.selectedLayers.length > 0) {
@@ -251,12 +247,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    initializeFloatingTextToolbar();
-    initializeFloatingSelectionToolbar();
-    initializeFloatingPdfToolbar();
-    initializeFloatingCurveToolbar();
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Передаем updateSubToolbarVisibility в инициализаторы ---
+    initializeFloatingTextToolbar(canvasState, performSaveState, redraw, updateSubToolbarVisibility);
+    initializeFloatingSelectionToolbar(canvasState, performSaveState, redraw, updateSubToolbarVisibility);
+    initializeFloatingPdfToolbar(canvasState, performSaveState, redraw, updateSubToolbarVisibility);
+    initializeFloatingCurveToolbar(canvasState, performSaveState, redraw, updateSubToolbarVisibility);
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
-    canvasState = initializeCanvas(drawingCanvas, interactionCanvas, ctx, redraw, performSaveState, updateToolbarCallback, debouncedSaveViewState, debouncedSaveState);
+    canvasState = initializeCanvas(drawingCanvas, interactionCanvas, ctx, redraw, performSaveState, updateSubToolbarVisibility, debouncedSaveViewState, debouncedSaveState);
     history.initHistory(canvasState);
     canvasState.redraw = redraw;
 
@@ -275,7 +273,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Передаем updateSubToolbarVisibility в initializeToolbar ---
     initializeToolbar(canvasState, redraw, updateSubToolbarVisibility, eventHandlers);
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
     initializeCustomTooltips();
     initializeEventListeners(canvasState, { ...eventHandlers, performDeleteSelectedCurveNode });
     initializeFileHandlers(canvasState, loadState, redraw, performSaveState);
@@ -285,12 +286,16 @@ document.addEventListener('DOMContentLoaded', () => {
     loadState(); 
     updateUndoRedoButtons();
     initializeHelpModal();
-    initializeSettingsModal();
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Передаем updateSubToolbarVisibility в initializeSettingsModal ---
+    initializeSettingsModal(canvasState, redraw, updateSubToolbarVisibility);
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
     window.addEventListener('resize', checkUiLayout);
     checkUiLayout();
 
-    function initializeFloatingTextToolbar() {
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Обновляем сигнатуру функции, теперь она принимает аргументы ---
+    function initializeFloatingTextToolbar(canvasState, performSaveState, redraw, updateSubToolbarVisibility) {
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
         const toolbar = document.getElementById('floating-text-toolbar');
         const floatingPalette = document.getElementById('floatingColorPalette');
         const colorPicker = document.getElementById('floating-color-picker');
@@ -466,7 +471,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function initializeFloatingSelectionToolbar() {
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Обновляем сигнатуру функции ---
+    function initializeFloatingSelectionToolbar(canvasState, performSaveState, redraw, updateSubToolbarVisibility) {
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
         const toolbar = document.getElementById('floating-selection-toolbar');
         toolbar.addEventListener('click', e => {
             const button = e.target.closest('button');
@@ -481,7 +488,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    function initializeFloatingCurveToolbar() {
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Обновляем сигнатуру функции ---
+    function initializeFloatingCurveToolbar(canvasState, performSaveState, redraw, updateSubToolbarVisibility) {
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
         const toolbar = document.getElementById('floating-curve-toolbar');
         toolbar.addEventListener('click', e => {
             const button = e.target.closest('button');
@@ -498,7 +507,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    function initializeFloatingPdfToolbar() {
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Обновляем сигнатуру функции ---
+    function initializeFloatingPdfToolbar(canvasState, performSaveState, redraw, updateSubToolbarVisibility) {
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
         const toolbar = document.getElementById('floating-pdf-toolbar');
 
         async function changePage(direction) {
@@ -622,7 +633,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function initializeSettingsModal() {
+    // --- НАЧАЛО ИЗМЕНЕНИЙ: Обновляем сигнатуру функции ---
+    function initializeSettingsModal(canvasState, redraw, updateSubToolbarVisibility) {
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
         const settingsBtn = document.getElementById('settingsBtn');
         const settingsModal = document.getElementById('settingsModal');
         const okBtn = document.getElementById('okSettings');
