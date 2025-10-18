@@ -13,11 +13,12 @@ let canvasStateRef = null;
 function cloneLayers(layers) {
     // Используем JSON.stringify с replacer-функцией для глубокого клонирования
     // и одновременного удаления проблемных ключей.
-    // Это самый надежный способ избежать циклических ссылок и сложных объектов.
     const replacer = (key, value) => {
-        if (key === 'image' || key === 'pdfDoc' || key === 'renderedPages') {
+        // --- НАЧАЛО ИЗМЕНЕНИЙ: Удаляем все тяжелые данные для истории ---
+        if (key === 'image' || key === 'pdfDoc' || key === 'renderedPages' || key === 'src' || key === 'fileData') {
             return undefined; // Удаляем эти ключи из результирующего JSON
         }
+        // --- КОНЕЦ ИЗМЕНЕНИЙ ---
         return value;
     };
     
@@ -34,11 +35,9 @@ export function saveState(layers, addToHistory = true) {
         if (historyIndex < history.length - 1) {
             history.splice(historyIndex + 1);
         }
-        // --- НАЧАЛО ИЗМЕНЕНИЙ: Уменьшаем лимит истории до 20 ---
         if (history.length > 20) {
             history.shift();
         }
-        // --- КОНЕЦ ИЗМЕНЕНИЙ ---
         // В историю кладем уже очищенную и безопасную копию
         history.push(cloneLayers(layers));
         historyIndex = history.length - 1;
@@ -63,15 +62,15 @@ export function saveState(layers, addToHistory = true) {
 export function undo() {
     if (!canUndo()) return null;
     historyIndex--;
-    // При восстановлении из истории мы снова делаем глубокую копию,
-    // чтобы изменения в `canvasState.layers` не затронули саму историю.
-    return cloneLayers(history[historyIndex]);
+    // Возвращаем "легкую" копию из истории. "Оживление" будет происходить в main.js
+    return JSON.parse(JSON.stringify(history[historyIndex]));
 }
 
 export function redo() {
     if (!canRedo()) return null;
     historyIndex++;
-    return cloneLayers(history[historyIndex]);
+    // Возвращаем "легкую" копию из истории. "Оживление" будет происходить в main.js
+    return JSON.parse(JSON.stringify(history[historyIndex]));
 }
 
 export function canUndo() {
