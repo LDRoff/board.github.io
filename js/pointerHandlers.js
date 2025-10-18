@@ -523,7 +523,6 @@ export function draw(state, callbacks, e) {
             tools.handleShapeDrawing(state.iCtx, state, pos, e);
         }
         else if (state.isDrawing) {
-            // --- НАЧАЛО ИЗМЕНЕНИЙ: Оптимизация производительности рисования ---
             if (state.activeTool === 'brush' || state.activeTool === 'smart-brush') {
                 const point = { ...pos };
                 if (e.pointerType === 'pen') {
@@ -533,30 +532,21 @@ export function draw(state, callbacks, e) {
                 state.tempLayer.points.push(point);
 
                 const iCtx = state.iCtx;
+                iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
+                
                 iCtx.save();
                 iCtx.translate(state.panX, state.panY);
                 iCtx.scale(state.zoom, state.zoom);
-                
-                iCtx.strokeStyle = state.tempLayer.color;
-                iCtx.lineCap = 'round';
-                iCtx.lineJoin = 'round';
 
-                const pressure = point.pressure || 0.5;
-                iCtx.lineWidth = Math.max(0.5, state.tempLayer.lineWidth * pressure);
-                
-                iCtx.beginPath();
-                iCtx.moveTo(state.lastBrushPoint.x, state.lastBrushPoint.y);
-                iCtx.lineTo(point.x, point.y);
-                iCtx.stroke();
+                drawLayer(iCtx, state.tempLayer, state);
                 
                 iCtx.restore();
 
-                state.lastBrushPoint = point;
+                state.lastBrushPoint = pos;
 
                 if (state.activeTool === 'smart-brush') {
                     clearTimeout(state.shapeRecognitionTimer);
                     state.shapeRecognitionTimer = setTimeout(() => {
-                        if (!state.isDrawing) return; // Не распознавать, если уже закончили рисовать
                         const recognizedShape = shapeRecognizer.recognizeShape(state.tempLayer.points);
                         if (recognizedShape) {
                             state.layers.push({
@@ -574,7 +564,6 @@ export function draw(state, callbacks, e) {
                         }
                     }, 500);
                 }
-            // --- КОНЕЦ ИЗМЕНЕНИЙ ---
             } else if (state.activeTool === 'eraser') {
                 if (!document.body.classList.contains('no-animations')) {
                     state.lastEraserPos = pos;
