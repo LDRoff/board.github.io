@@ -55,7 +55,6 @@ export function createInitialState() {
         snappingMode: 'auto', // 'manual' or 'auto'
         persistentSnapOffset: { x: 0, y: 0 },
         selectedCurveNodeIndex: null,
-        redrawPending: false, // --- ДОБАВЛЕНО: Флаг для оптимизации рендеринга
     };
 }
 // --- END OF FILE js/state.js ---
