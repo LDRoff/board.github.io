@@ -1,17 +1,21 @@
 <div align="center">
 
-<img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZneGN6Z3B2Y3F4ZTNneHZmZjNneGZneHZmZjNneGZneHZmZjNneCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/L1R1tvI9svkIWwpVYr/giphy.gif" width="250" alt="Coding Cat" />
+  <img src="https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif" width="250" alt="Coding Cat" />
 
-# 🐾 Сайт на обеденном перерыве (и котики тоже) 🍣
+  <h1>🐾 Сайт на обеденном перерыве (и котики тоже) 🍣</h1>
 
-**Мяу-статус:** `Кот-сеньор уснул на клавиатуре. Ждем, пока проснется, чтобы задеплоить код.`
+  <p><b>Мяу-статус:</b> <code>Кот-сеньор уснул на клавиатуре. Ждем, пока проснется, чтобы задеплоить код.</code></p>
 
-[![Status](https://img.shields.io/badge/Status-Taking_a_nap-ff69b4?style=for-the-badge&logo=github)](#)
-[![Cat Power](https://img.shields.io/badge/Powered_by-Catnip_&_Coffee-ff9900?style=for-the-badge&logo=coffeescript)](#)
+  <p>
+    <img src="https://img.shields.io/badge/Status-Taking_a_nap-ff69b4?style=for-the-badge&logo=github" alt="Status" />
+    <img src="https://img.shields.io/badge/Powered_by-Catnip_&_Coffee-ff9900?style=for-the-badge&logo=coffeescript" alt="Cat Power" />
+  </p>
 
-<br>
-<hr>
+  <br>
+
 </div>
+
+---
 
 ### 🐈‍⬛ Почему тут пока пусто и где весь код?
 
@@ -19,7 +23,7 @@
 
 <table>
   <tr>
-    <td align="center">🧶</td>
+    <td align="center" width="50">🧶</td>
     <td><b>Распутываем клубок зависимостей:</b> Устанавливаем новые пакеты. Кто-то из пушистых случайно нажал <code>npm install</code>, и теперь мы послушно ждем, пока скачается половина интернета.</td>
   </tr>
   <tr>
@@ -47,6 +51,6 @@
   <h3>Забегай чуть позже! 🚀</h3>
   <p>Когда мы допьем молочко и допишем код, здесь будет на что посмотреть. Обещаем настоящий ВАУ-эффект!</p>
   
-  <img src="https://media.giphy.com/media/3oriO0OEd9QIDdllqo/giphy.gif" width="120" alt="Cat Waiting" />
+  <img src="https://media.giphy.com/media/13CoXDiaCcCoyk/giphy.gif" width="150" alt="Cat Waiting" />
 
 </div>
