@@ -1,0 +1,85 @@
+:root {
+    --app-background: #f0f2f5;
+    --app-background-overlay: none;
+    --glass-surface: rgba(240, 242, 245, 0.8);
+    --glass-surface-opaque: rgba(240, 242, 245, 0.95);
+    --glass-border: rgba(255, 255, 255, 0.2);
+    --glass-border-strong: rgba(255, 255, 255, 0.4);
+    --glass-shadow: 0 10px 40px rgba(0, 0, 0, 0.12), 0 4px 12px rgba(0, 0, 0, 0.08);
+    --glass-glow: none;
+    --glass-highlight: none;
+    --glass-inner-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
+    --glass-gradient-mask: none;
+    --accent-color: #3b82f6;
+    --text-primary: #374151;
+    --text-secondary: #6b7280;
+    
+    /* New UI Variables */
+    --bg-body: #f0f2f5;
+    --bg-overlay: rgba(15, 23, 42, 0.4);
+    --bg-modal: #ffffff;
+    --bg-modal-glass: rgba(255, 255, 255, 0.85);
+    --bg-sidebar: #f8fafc;
+    --bg-element: #f1f5f9;
+    --bg-element-hover: #e2e8f0;
+    
+    --text-main: #0f172a;
+    --text-muted: #64748b;
+    
+    --border-color: #e2e8f0;
+    --primary-color: #3b82f6; 
+    --primary-hover: #2563eb;
+    --primary-light: rgba(59, 130, 246, 0.1);
+    
+    --radius-md: 10px;
+    --radius-lg: 20px;
+    
+    --shadow-modal: 0 25px 50px -12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+    --shadow-dropdown: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    
+    --kbd-bg: #ffffff;
+    --kbd-border: #cbd5e1;
+    --kbd-shadow: #e2e8f0;
+    
+    --danger-color: #ef4444;
+    --danger-hover: #dc2626;
+    --danger-light: rgba(239, 68, 68, 0.15);
+}
+
+body.dark-theme {
+    --app-background: #1f2937;
+    --app-background-overlay: none;
+    --glass-surface: rgba(31, 41, 55, 0.8);
+    --glass-surface-opaque: rgba(31, 41, 55, 0.95);
+    --glass-border: rgba(75, 85, 99, 0.3);
+    --glass-border-strong: rgba(75, 85, 99, 0.5);
+    --glass-shadow: 0 10px 40px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.25);
+    --glass-glow: none;
+    --glass-highlight: none;
+    --glass-inner-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+    --glass-gradient-mask: none;
+    --text-primary: #e5e7eb;
+    --text-secondary: #9ca3af;
+
+    /* New UI Variables (Dark) */
+    --bg-body: #0f172a;
+    --bg-overlay: rgba(0, 0, 0, 0.7);
+    --bg-modal: #1e293b;
+    --bg-modal-glass: rgba(30, 41, 59, 0.85);
+    --bg-sidebar: #0f172a;
+    --bg-element: #334155;
+    --bg-element-hover: #475569;
+    
+    --text-main: #f8fafc;
+    --text-muted: #94a3b8;
+    
+    --border-color: #334155;
+    --primary-light: rgba(59, 130, 246, 0.15);
+    
+    --shadow-modal: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    --shadow-dropdown: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+    
+    --kbd-bg: #1e293b;
+    --kbd-border: #475569;
+    --kbd-shadow: #0f172a;
+}
