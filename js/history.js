@@ -8,9 +8,9 @@ let historyIndex = -1;
 let canvasStateRef = null;
 
 let pendingChanges = {
-    updated: new Map(),
-    created: new Map(),
-    deleted: new Set(),
+  updated: new Map(),
+  created: new Map(),
+  deleted: new Set(),
 };
 
 export function setCanvasStateRef(ref) { canvasStateRef = ref; }
@@ -39,13 +39,13 @@ function _scheduleDBUpdate() {
             zoom: canvasStateRef ? canvasStateRef.zoom : 1,
           },
         };
-        
+
         saveStateToDB({ type: 'update', payload });
-        
+
         pendingChanges = {
-            updated: new Map(),
-            created: new Map(),
-            deleted: new Set(),
+          updated: new Map(),
+          created: new Map(),
+          deleted: new Set(),
         };
       } catch (e) {
         console.error('Не удалось запланировать отправку обновлений:', e);
@@ -55,36 +55,38 @@ function _scheduleDBUpdate() {
 }
 
 function addChangeToPending(change) {
-    switch (change.type) {
-        case 'creation':
-            (change.after || []).forEach(layer => {
-                pendingChanges.created.set(layer.id, layer);
-                pendingChanges.deleted.delete(layer.id);
-                pendingChanges.updated.delete(layer.id);
-            });
-            break;
-        case 'deletion':
-            (change.before || []).forEach(layer => {
-                pendingChanges.deleted.add(layer.id);
-                pendingChanges.created.delete(layer.id);
-                pendingChanges.updated.delete(layer.id);
-            });
-            break;
-        case 'update':
-            (change.after || []).forEach(layer => {
-                if (!pendingChanges.created.has(layer.id)) {
-                    pendingChanges.updated.set(layer.id, layer);
-                }
-            });
-            break;
-        case 'reorder':
-            canvasStateRef.layers.forEach(layer => {
-                if (!pendingChanges.created.has(layer.id)) {
-                    pendingChanges.updated.set(layer.id, layer);
-                }
-            });
-            break;
+  switch (change.type) {
+    case 'creation':
+      (change.after || []).forEach(layer => {
+        pendingChanges.created.set(layer.id, layer);
+        pendingChanges.deleted.delete(layer.id);
+        pendingChanges.updated.delete(layer.id);
+      });
+      break;
+    case 'deletion':
+      (change.before || []).forEach(layer => {
+        pendingChanges.deleted.add(layer.id);
+        pendingChanges.created.delete(layer.id);
+        pendingChanges.updated.delete(layer.id);
+      });
+      break;
+    case 'update':
+      (change.after || []).forEach(layer => {
+        if (!pendingChanges.created.has(layer.id)) {
+          pendingChanges.updated.set(layer.id, layer);
+        }
+      });
+      break;
+    case 'reorder':
+      if (canvasStateRef && canvasStateRef.layers) {
+        canvasStateRef.layers.forEach(layer => {
+          if (!pendingChanges.created.has(layer.id)) {
+            pendingChanges.updated.set(layer.id, layer);
+          }
+        });
       }
+      break;
+  }
 }
 
 export function addHistoryEntry(change) {
@@ -96,68 +98,113 @@ export function addHistoryEntry(change) {
   }
   history.push(change);
   historyIndex = history.length - 1;
-  
+
   addChangeToPending(change);
   _scheduleDBUpdate();
 }
 
 export function scheduleDirectDBUpdate() {
-    _scheduleDBUpdate();
+  _scheduleDBUpdate();
 }
 
-export function undo(currentLayers) {
-    if (!canUndo()) return { layers: null, selectedIds: [] };
-
-    const change = history[historyIndex];
-    historyIndex--;
-
-    const { newLayers, selectedIds } = applyChange(currentLayers, change, true);
+export function flushDBUpdate() {
+  if (_dbSaveTimer) {
+    clearTimeout(_dbSaveTimer);
+    _dbSaveTimer = null;
     
-    const reverseChange = {
-        type: change.type === 'creation' ? 'deletion' : (change.type === 'deletion' ? 'creation' : change.type),
-        before: change.after,
-        after: change.before
-    };
-    addChangeToPending(reverseChange);
-    _scheduleDBUpdate();
+    try {
+      const payload = {
+        changes: {
+          updated: Array.from(pendingChanges.updated.values()),
+          created: Array.from(pendingChanges.created.values()),
+          deleted: Array.from(pendingChanges.deleted),
+        },
+        viewState: {
+          panX: canvasStateRef ? canvasStateRef.panX : 0,
+          panY: canvasStateRef ? canvasStateRef.panY : 0,
+          zoom: canvasStateRef ? canvasStateRef.zoom : 1,
+        },
+      };
 
-    return { layers: newLayers, selectedIds };
+      saveStateToDB({ type: 'update', payload });
+
+      pendingChanges = {
+        updated: new Map(),
+        created: new Map(),
+        deleted: new Set(),
+      };
+    } catch (e) {
+      console.error('Не удалось отправить обновления при выгрузке:', e);
+    }
+  }
+}
+
+window.addEventListener('beforeunload', flushDBUpdate);
+
+export function undo(currentLayers) {
+  if (!canUndo()) return { layers: null, selectedIds: [] };
+
+  const change = history[historyIndex];
+  historyIndex--;
+
+  const { newLayers, selectedIds } = applyChange(currentLayers, change, true);
+
+  // --- TILE MANAGER UPDATE ---
+  // При отмене действия мы полностью сбрасываем кэш плиток, 
+  // чтобы гарантировать корректное отображение предыдущего состояния.
+  if (canvasStateRef && canvasStateRef.tileManager) {
+    canvasStateRef.tileManager.clear();
+  }
+  // ---------------------------
+
+  const reverseChange = {
+    type: change.type === 'creation' ? 'deletion' : (change.type === 'deletion' ? 'creation' : change.type),
+    before: change.after,
+    after: change.before
+  };
+  addChangeToPending(reverseChange);
+  _scheduleDBUpdate();
+
+  return { layers: newLayers, selectedIds };
 }
 
 export function redo(currentLayers) {
-    if (!canRedo()) return { layers: null, selectedIds: [] };
-    
-    historyIndex++;
-    const change = history[historyIndex];
+  if (!canRedo()) return { layers: null, selectedIds: [] };
 
-    // --- НАЧАЛО ИЗМЕНЕНИЙ ---
-    // Применяем изменение, но игнорируем возвращаемый selectedIds.
-    // Redo не должно приводить к выделению объектов.
-    const { newLayers } = applyChange(currentLayers, change, false);
+  historyIndex++;
+  const change = history[historyIndex];
 
-    addChangeToPending(change);
-    _scheduleDBUpdate();
-    
-    // Возвращаем пустой массив для selectedIds, чтобы ничего не выделялось.
-    return { layers: newLayers, selectedIds: [] };
-    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+  const { newLayers } = applyChange(currentLayers, change, false);
+
+  // --- TILE MANAGER UPDATE ---
+  // При повторе действия также сбрасываем кэш.
+  if (canvasStateRef && canvasStateRef.tileManager) {
+    canvasStateRef.tileManager.clear();
+  }
+  // ---------------------------
+
+  addChangeToPending(change);
+  _scheduleDBUpdate();
+
+  // Возвращаем пустой массив для selectedIds, чтобы ничего не выделялось при Redo.
+  return { layers: newLayers, selectedIds: [] };
 }
 
 function applyChange(layers, change, isUndo) {
-    const sourceState = isUndo ? change.before : change.after;
-    const targetState = isUndo ? change.after : change.before;
+  const sourceState = isUndo ? change.before : change.after;
+  const targetState = isUndo ? change.after : change.before;
 
-    if (change.type === 'reorder') {
-        const selectedIds = (isUndo ? change.before : change.after).map(l => l.id);
-        return { newLayers: cloneLayersForAction(isUndo ? change.before : change.after), selectedIds };
-    }
-    
-    const targetIds = new Set((targetState || []).map(l => l.id));
-    let newLayers = layers.filter(l => !targetIds.has(l.id));
-    newLayers.push(...cloneLayersForAction(sourceState || []));
+  if (change.type === 'reorder') {
+    const selectedIds = (isUndo ? change.before : change.after).map(l => l.id);
+    return { newLayers: cloneLayersForAction(isUndo ? change.before : change.after), selectedIds };
+  }
 
-    const selectedIds = (sourceState || []).map(l => l.id);
-    return { newLayers, selectedIds };
+  const targetIds = new Set((targetState || []).map(l => l.id));
+  let newLayers = layers.filter(l => !targetIds.has(l.id));
+  newLayers.push(...cloneLayersForAction(sourceState || []));
+
+  const selectedIds = (sourceState || []).map(l => l.id);
+  return { newLayers, selectedIds };
 }
 
 export function canUndo() { return historyIndex >= 0; }
@@ -172,7 +219,7 @@ export function resetHistory() {
 export function initHistory(cs, initialLayers = []) {
   setCanvasStateRef(cs);
   resetHistory();
-  
+
   const initialState = {
     viewState: {
       panX: cs ? cs.panX : 0,
