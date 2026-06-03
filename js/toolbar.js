@@ -6,13 +6,13 @@ import * as utils from './utils.js';
 export function initializeToolbar(canvasState, redrawCallback, updateToolbarCallback, handlers) {
     const toolbarWrapper = document.getElementById('toolbarWrapper');
     const toolbar = document.getElementById('toolbar');
-    
+
     const drawingSubToolbar = document.getElementById('drawingSubToolbar');
     const colorPalette = document.getElementById('colorPalette');
     const lineStyleOptions = document.getElementById('lineStyleOptions');
 
     const expandSubToolbarBtn = document.getElementById('expandSubToolbarBtn');
-    
+
     const shapes2DBtn = document.getElementById('shapes2DBtn');
     const shapes2DOptions = document.getElementById('shapes2DOptions');
     const shapes2DToolContainer = document.getElementById('shapes-2d-tool-container');
@@ -25,6 +25,8 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
     const addFileOptions = document.getElementById('addFileOptions');
     const addFileToolContainer = document.getElementById('add-file-tool-container');
 
+    const addRulerBtn = document.getElementById('addRulerBtn');
+
     const zoomControls = document.getElementById('zoomControls');
 
     const mobileDrawingToolbar = document.getElementById('mobileDrawingSubToolbar');
@@ -36,23 +38,37 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
     const mobileStyleBtn = document.getElementById('mobileStyleBtn');
     const mobileColorPalette = document.getElementById('mobileColorPalette');
     const mobileLineStyleOptions = document.getElementById('mobileLineStyleOptions');
-    
+
     const lineStyleContainer = document.getElementById('lineStyleContainer');
     const lineStyleBtn = document.getElementById('lineStyleBtn');
+    const desktopFillColorContainer = document.getElementById('desktopFillColorContainer');
+    const desktopFillColorBtn = document.getElementById('desktopFillColorBtn');
     const sliderContainers = document.querySelectorAll('.line-width-slider-container');
 
+    // Smart brush toggle buttons
+    const desktopSmartBrushToggle = document.getElementById('desktopSmartBrushToggle');
+    const mobileSmartBrushToggle = document.getElementById('mobileSmartBrushToggle');
+
     const allSubtoolContainers = [
-        shapes2DToolContainer, 
-        shapes3DToolContainer, 
-        addFileToolContainer, 
-        lineStyleContainer, 
+        shapes2DToolContainer,
+        shapes3DToolContainer,
+        addFileToolContainer,
+        lineStyleContainer,
+        desktopFillColorContainer,
         ...sliderContainers
-    ];
+    ].filter(Boolean);
 
     mobileColorPalette.innerHTML = colorPalette.innerHTML;
     mobileLineStyleOptions.innerHTML = lineStyleOptions.innerHTML;
 
-    const mobileDropdowns = [mobileColorContainer, mobileWidthContainer, mobileStyleContainer];
+    const fillColorPalette = document.getElementById('fillColorPalette');
+    const mobileFillColorPalette = document.getElementById('mobileFillColorPalette');
+    if (fillColorPalette && mobileFillColorPalette) {
+        mobileFillColorPalette.innerHTML = fillColorPalette.innerHTML;
+    }
+
+    // Added mobileFillColorContainer to fix mobile dropdown toggle
+    const mobileDropdowns = [mobileColorContainer, mobileWidthContainer, mobileStyleContainer, document.getElementById('mobile-fill-color-container')].filter(Boolean);
 
     mobileDrawingToolbar.addEventListener('click', (e) => {
         const button = e.target.closest('button');
@@ -60,12 +76,12 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
 
         const container = button.closest('.dropdown-container');
         if (!container) return;
-        
+
         e.stopPropagation();
         const wasActive = container.classList.contains('active');
-        
+
         mobileDropdowns.forEach(d => d.classList.remove('active'));
-        
+
         if (!wasActive) {
             container.classList.add('active');
         }
@@ -88,26 +104,44 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
     function cancelInProgressActions() {
         const multiStepActions = [
             'drawingCurve', 'drawingParallelogramSlant', 'drawingTriangleApex', 'drawingParallelepipedDepth',
-            'drawingPyramidApex', 'drawingTrapezoidP3', 'drawingTrapezoidP4', 
+            'drawingPyramidApex', 'drawingTrapezoidP3', 'drawingTrapezoidP4',
             'drawingFrustum', 'drawingTruncatedSphere', 'drawingTruncatedPyramidApex', 'drawingTruncatedPyramidTop'
         ];
         if (multiStepActions.includes(canvasState.currentAction)) {
             if (canvasState.currentAction === 'drawingCurve' && canvasState.tempLayer && canvasState.tempLayer.nodes.length > 1) {
-                canvasState.layers.push(canvasState.tempLayer);
-                handlers.performSaveState(canvasState.layers);
+                const newLayer = utils.cloneLayersForAction([canvasState.tempLayer])[0];
+                delete newLayer.isEditing;
+                canvasState.layers.push(newLayer);
+                if (canvasState.tileManager) canvasState.tileManager.invalidateLayer(newLayer, canvasState);
+                if (canvasState.spatialGrid) {
+                    const box = geo.getTransformedBoundingBox(newLayer);
+                    if (box) {
+                        const startCol = Math.floor(box.x / 500); const endCol = Math.floor((box.x + box.width) / 500);
+                        const startRow = Math.floor(box.y / 500); const endRow = Math.floor((box.y + box.height) / 500);
+                        for (let r = startRow; r <= endRow; r++) {
+                            for (let c = startCol; c <= endCol; c++) {
+                                const cellKey = `${c}_${r}`;
+                                if (!canvasState.spatialGrid.has(cellKey)) canvasState.spatialGrid.set(cellKey, []);
+                                canvasState.spatialGrid.get(cellKey).push(newLayer);
+                            }
+                        }
+                    }
+                }
+                canvasState.saveState({ type: 'creation', before: [], after: [newLayer] });
             }
             canvasState.currentAction = 'none';
             canvasState.tempLayer = null;
             if (canvasState.hideCreationTooltip) {
                 canvasState.hideCreationTooltip();
             }
+            if (canvasState.redraw) canvasState.redraw();
             redrawCallback();
         }
         if (canvasState.resetMobileShapeState) {
             canvasState.resetMobileShapeState();
         }
     }
-    
+
     function toggleDropdown(container) {
         const wasActive = container.classList.contains('active');
         allSubtoolContainers.forEach(c => c.classList.remove('active'));
@@ -134,6 +168,39 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
         toggleDropdown(addFileToolContainer);
     });
 
+    if (addRulerBtn) {
+        addRulerBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            cancelInProgressActions();
+            
+            // Generate a unique ID
+            const id = 'ruler_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+            
+            // Place in the center of the viewport
+            const dpr = window.devicePixelRatio || 1;
+            const x = ((canvasState.canvas.width / dpr) / 2 - canvasState.panX) / canvasState.zoom;
+            const y = ((canvasState.canvas.height / dpr) / 2 - canvasState.panY) / canvasState.zoom;
+            
+            canvasState.rulers.push({
+                id: id,
+                x: x,
+                y: y,
+                angle: 0,
+                length: 600, // 15 cm default
+                width: 60,
+                pivotOffset: 0,
+                snapEnabled: false,
+                snapAngle: 15,
+                color: null
+            });
+            
+            redrawCallback();
+            
+            // Temporarily select brush or select tool to exit whatever was active if needed, or just let them add multiple.
+            // We don't change tools, just add it.
+        });
+    }
+
     addFileOptions.addEventListener('click', (e) => {
         e.preventDefault();
         const target = e.target.closest('a');
@@ -157,25 +224,31 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
         if (!option) return;
         const tool = option.dataset.tool;
         if (!tool) return;
-        
+
         cancelInProgressActions();
         canvasState.currentAction = 'none';
         canvasState.isDrawing = false;
-        mainButton.innerHTML = option.querySelector('svg').outerHTML;
+        const svg = option.querySelector('svg');
+        const img = option.querySelector('img');
+        if (img) {
+            mainButton.innerHTML = img.outerHTML;
+        } else if (svg) {
+            mainButton.innerHTML = svg.outerHTML;
+        }
         canvasState.activeTool = tool;
         if (canvasState.activeTool !== 'select') {
             canvasState.previousTool = canvasState.activeTool;
         }
-        
+
         toolbar.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
         zoomControls.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
         mainButton.classList.add('active');
-        
+
         drawingSubToolbar.classList.remove('sub-toolbar-collapsed');
-        
+
         handlers.performDeselect();
         container.classList.remove('active');
-        
+
         const canvas = canvasState.canvas;
         canvas.classList.remove('cursor-brush', 'cursor-eraser');
         canvas.style.cursor = 'crosshair';
@@ -198,7 +271,7 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
             handlers.performRedo();
             return;
         }
-        
+
         if (button.dataset.toolGroup === 'shapes' || button.dataset.toolGroup === 'files') return;
 
         const tool = button.dataset.tool;
@@ -210,20 +283,32 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
             canvasState.previousTool = canvasState.activeTool;
         }
         canvasState.activeTool = tool;
-        
+
         toolbar.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
         zoomControls.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
         if (button.dataset.tool) button.classList.add('active');
-        
+
         const drawableTools = ['brush', 'smart-brush', 'eraser'];
         if (drawableTools.includes(tool)) {
             drawingSubToolbar.classList.remove('sub-toolbar-collapsed');
         }
 
-        if (tool !== 'select') { 
+        // When selecting brush or smart-brush from toolbar, respect smartBrushEnabled toggle
+        // (The smart-brush button is removed from main toolbar, but we keep compatibility)
+        if (tool === 'brush' || tool === 'smart-brush') {
+            // Selecting brush tool: respect the toggle state
+            canvasState.activeTool = canvasState.smartBrushEnabled ? 'smart-brush' : 'brush';
+            // Mark the brush button as active (visual)
+            toolbar.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+            zoomControls.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+            const brushBtn = toolbar.querySelector('button[data-tool="brush"]');
+            if (brushBtn) brushBtn.classList.add('active');
+        }
+
+        if (tool !== 'select') {
             handlers.performDeselect();
         }
-        
+
         const canvas = canvasState.canvas;
         canvas.classList.remove('cursor-brush', 'cursor-eraser');
         canvas.style.cursor = '';
@@ -232,13 +317,59 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
             canvas.classList.add('cursor-brush');
         } else if (tool === 'eraser') {
             canvas.classList.add('cursor-eraser');
+            canvas.style.cursor = utils.getEraserCursorStyle(canvasState.activeEraserWidth, canvasState.zoom, document.body.classList.contains('dark-theme'));
         } else if (tool === 'text') {
             canvas.style.cursor = 'text';
         } else {
             canvas.style.cursor = 'default';
         }
 
+        // Sync the width slider visually to the selected tool (but don't trigger a save)
+        if (drawableTools.includes(tool) || tool === 'line' || button.dataset.toolGroup === 'shapes') {
+            const activeProp = canvasState.activeTool === 'eraser' ? canvasState.activeEraserWidth : canvasState.activeLineWidth;
+
+            // Bypass handleLineWidthChange because we don't want to actually change the state or trigger saves, just update UI
+            const widthInputs = document.querySelectorAll('.line-width-input');
+            const widthSliders = document.querySelectorAll('.line-width-slider');
+            const mobileWidthValue = document.getElementById('mobileWidthValue');
+            const allPresets = document.querySelectorAll('.line-width-presets');
+
+            widthInputs.forEach(input => input.value = activeProp);
+            widthSliders.forEach(slider => slider.value = activeProp);
+            if (mobileWidthValue) mobileWidthValue.textContent = activeProp;
+
+            allPresets.forEach(container => {
+                container.querySelectorAll('button').forEach(btn => {
+                    let presetValToCheck = parseInt(btn.dataset.preset);
+                    if (canvasState.activeTool === 'eraser') {
+                        if (presetValToCheck === 2) presetValToCheck = 10;
+                        else if (presetValToCheck === 8) presetValToCheck = 40;
+                        else if (presetValToCheck === 16) presetValToCheck = 80;
+                    }
+                    btn.classList.toggle('active', presetValToCheck === activeProp);
+                });
+            });
+
+            const colorPalette = document.getElementById('colorPalette');
+            const lineStyleContainer = document.getElementById('lineStyleContainer');
+            const mobileColorContainer = document.getElementById('mobile-color-container');
+            const mobileStyleContainer = document.getElementById('mobile-style-container');
+
+            if (canvasState.activeTool === 'eraser') {
+                if (colorPalette) colorPalette.style.display = 'none';
+                if (lineStyleContainer) lineStyleContainer.style.display = 'none';
+                if (mobileColorContainer) mobileColorContainer.style.display = 'none';
+                if (mobileStyleContainer) mobileStyleContainer.style.display = 'none';
+            } else {
+                if (colorPalette) colorPalette.style.display = '';
+                if (lineStyleContainer) lineStyleContainer.style.display = '';
+                if (mobileColorContainer) mobileColorContainer.style.display = '';
+                if (mobileStyleContainer) mobileStyleContainer.style.display = '';
+            }
+        }
+
         updateToolbarCallback();
+        syncSmartBrushToggleUI();
     });
 
     zoomControls.addEventListener('click', (e) => {
@@ -247,14 +378,30 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
 
         const tool = button.dataset.tool;
         if (tool === 'pan') {
+            if (canvasState.activeTool === 'pan') {
+                const fallbackTool = canvasState.previousTool || 'select';
+                const fallbackElement = document.querySelector(`[data-tool="${fallbackTool}"]`);
+                if (fallbackElement) {
+                    fallbackElement.click();
+                } else {
+                    document.querySelector(`button[data-tool="select"]`)?.click();
+                }
+                return;
+            }
+
             cancelInProgressActions();
             canvasState.currentAction = 'none';
             canvasState.isDrawing = false;
+            
+            if (canvasState.activeTool !== 'pan') {
+                canvasState.previousTool = canvasState.activeTool;
+            }
+
             canvasState.activeTool = 'pan';
 
             toolbar.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
             zoomControls.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
-            
+
             button.classList.add('active');
 
             handlers.performDeselect();
@@ -266,21 +413,65 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
         }
     });
 
+    // --- Smart Brush Toggle Logic ---
+    function syncSmartBrushToggleUI() {
+        const isSmartActive = canvasState.smartBrushEnabled;
+        const isBrushTool = canvasState.activeTool === 'brush' || canvasState.activeTool === 'smart-brush';
+
+        if (desktopSmartBrushToggle) {
+            desktopSmartBrushToggle.classList.toggle('active', isSmartActive);
+            const wrapper = document.getElementById('desktopSmartBrushWrapper');
+            if (wrapper) wrapper.style.display = isBrushTool ? '' : 'none';
+        }
+        if (mobileSmartBrushToggle) {
+            mobileSmartBrushToggle.classList.toggle('active', isSmartActive);
+            mobileSmartBrushToggle.style.display = isBrushTool ? '' : 'none';
+        }
+    }
+
+    function handleSmartBrushToggle() {
+        canvasState.smartBrushEnabled = !canvasState.smartBrushEnabled;
+        const isBrushActive = canvasState.activeTool === 'brush' || canvasState.activeTool === 'smart-brush';
+        if (isBrushActive) {
+            canvasState.activeTool = canvasState.smartBrushEnabled ? 'smart-brush' : 'brush';
+        }
+        syncSmartBrushToggleUI();
+    }
+
+    if (desktopSmartBrushToggle) {
+        desktopSmartBrushToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            handleSmartBrushToggle();
+        });
+    }
+    if (mobileSmartBrushToggle) {
+        mobileSmartBrushToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            handleSmartBrushToggle();
+        });
+    }
+
+    // Initial sync on load
+    syncSmartBrushToggleUI();
+
     function handleColorChange(newColor) {
         if (canvasState.selectedLayers.length > 0) {
             canvasState.selectedLayers.forEach(layer => {
                 if (layer.hasOwnProperty('color') && layer.type !== 'text') {
                     layer.color = newColor;
+                    if (canvasState.tileManager) {
+                        canvasState.tileManager.invalidateLayer(layer, canvasState);
+                    }
                 }
             });
             redrawCallback();
             canvasState.saveState(canvasState.layers);
         }
 
-        canvasState.activeColor = newColor; 
+        canvasState.activeColor = newColor;
 
         [colorPalette, mobileColorPalette].forEach(palette => {
-            palette.querySelectorAll('.active').forEach(el => el.classList.remove('active')); 
+            palette.querySelectorAll('.active').forEach(el => el.classList.remove('active'));
             const activeDot = palette.querySelector(`[data-color="${newColor}"]`);
             if (activeDot) activeDot.classList.add('active');
         });
@@ -291,25 +482,107 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
         }
     }
 
-    colorPalette.addEventListener('click', (e) => { 
-        const target = e.target.closest('[data-color]'); 
-        if (target) { 
+    colorPalette.addEventListener('click', (e) => {
+        const target = e.target.closest('[data-color]');
+        if (target) {
             handleColorChange(target.dataset.color);
-        } 
+        }
     });
     mobileColorPalette.addEventListener('click', (e) => {
         const target = e.target.closest('.color-dot');
-        if(target) {
+        if (target) {
             handleColorChange(target.dataset.color);
             mobileColorContainer.classList.remove('active');
         }
     });
 
+    const mobileFillColorBtn = document.getElementById('mobileFillColorBtn');
+    const mobileFillColorContainer = document.getElementById('mobile-fill-color-container');
+
+    function handleFillColorChange(newColor) {
+        if (canvasState.selectedLayers.length > 0) {
+            canvasState.selectedLayers.forEach(layer => {
+                if (['rect', 'ellipse', 'parallelogram', 'triangle', 'trapezoid', 'rhombus'].includes(layer.type)) {
+                    layer.fillColor = newColor;
+                    if (canvasState.tileManager) {
+                        canvasState.tileManager.invalidateLayer(layer, canvasState);
+                    }
+                }
+            });
+            redrawCallback();
+            canvasState.saveState(canvasState.layers);
+        }
+
+        canvasState.activeFillColor = newColor;
+
+        if (fillColorPalette && mobileFillColorPalette) {
+            [fillColorPalette, mobileFillColorPalette].forEach(palette => {
+                palette.querySelectorAll('.active').forEach(el => el.classList.remove('active'));
+                const activeDot = palette.querySelector(`[data-fill="${newColor}"]`);
+                if (activeDot) activeDot.classList.add('active');
+            });
+        }
+
+        // Update desktop fill button icon
+        if (desktopFillColorBtn) {
+            const desktopFillSVG = desktopFillColorBtn.querySelector('svg');
+            if (desktopFillSVG) {
+                if (newColor === 'transparent') {
+                    desktopFillSVG.innerHTML = '<path d="M19 11l-8-8-8 8a8 8 0 1 0 16 0z"></path>';
+                    desktopFillSVG.setAttribute('fill', 'none');
+                    desktopFillSVG.setAttribute('stroke', 'currentColor');
+                } else {
+                    desktopFillSVG.innerHTML = '<path d="M19 11l-8-8-8 8a8 8 0 1 0 16 0z"></path>';
+                    desktopFillSVG.setAttribute('fill', newColor);
+                    desktopFillSVG.setAttribute('stroke', newColor);
+                }
+            }
+        }
+
+        // Update mobile fill button icon
+        if (mobileFillColorBtn) {
+            const mobileFillColorSVG = mobileFillColorBtn.querySelector('svg');
+            if (mobileFillColorSVG) {
+                if (newColor === 'transparent') {
+                    mobileFillColorSVG.innerHTML = '<path d="M19 11l-8-8-8 8a8 8 0 1 0 16 0z"></path>';
+                    mobileFillColorSVG.setAttribute('fill', 'none');
+                    mobileFillColorSVG.setAttribute('stroke', 'currentColor');
+                } else {
+                    mobileFillColorSVG.innerHTML = '<path d="M19 11l-8-8-8 8a8 8 0 1 0 16 0z"></path>';
+                    mobileFillColorSVG.setAttribute('fill', newColor);
+                    mobileFillColorSVG.setAttribute('stroke', newColor);
+                }
+            }
+        }
+    }
+
+    if (fillColorPalette) {
+        fillColorPalette.addEventListener('click', (e) => {
+            const target = e.target.closest('[data-fill]');
+            if (target) {
+                handleFillColorChange(target.dataset.fill);
+                const desktopContainer = document.getElementById('desktopFillColorContainer');
+                if (desktopContainer) desktopContainer.classList.remove('active');
+            }
+        });
+    }
+
+    if (mobileFillColorPalette) {
+        mobileFillColorPalette.addEventListener('click', (e) => {
+            const target = e.target.closest('.color-dot');
+            if (target) {
+                handleFillColorChange(target.dataset.fill);
+                if (mobileFillColorContainer) mobileFillColorContainer.classList.remove('active');
+            }
+        });
+    }
+
+
     const lineWidthIndicator = document.getElementById('lineWidthIndicator');
     const widthInputs = document.querySelectorAll('.line-width-input');
     const widthSliders = document.querySelectorAll('.line-width-slider');
     const allPresets = document.querySelectorAll('.line-width-presets');
-    
+
     const mobileWidthValue = document.getElementById('mobileWidthValue');
 
     let saveStateTimeout = null;
@@ -317,7 +590,12 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
     function handleLineWidthChange(newWidth, save = false) {
         const value = Math.max(1, Math.min(100, parseInt(newWidth, 10) || 1));
 
-        canvasState.activeLineWidth = value;
+        if (canvasState.activeTool === 'eraser') {
+            canvasState.activeEraserWidth = value;
+            canvasState.canvas.style.cursor = utils.getEraserCursorStyle(value, canvasState.zoom, document.body.classList.contains('dark-theme'));
+        } else {
+            canvasState.activeLineWidth = value;
+        }
 
         widthInputs.forEach(input => input.value = value);
         widthSliders.forEach(slider => slider.value = value);
@@ -325,17 +603,28 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
 
         allPresets.forEach(container => {
             container.querySelectorAll('button').forEach(btn => {
-                btn.classList.toggle('active', parseInt(btn.dataset.preset) === value);
+                let presetValToCheck = parseInt(btn.dataset.preset);
+                if (canvasState.activeTool === 'eraser') {
+                    if (presetValToCheck === 2) presetValToCheck = 10;
+                    else if (presetValToCheck === 8) presetValToCheck = 40;
+                    else if (presetValToCheck === 16) presetValToCheck = 80;
+                }
+                btn.classList.toggle('active', presetValToCheck === value);
             });
         });
 
         if (canvasState.selectedLayers.length > 0) {
             canvasState.selectedLayers.forEach(layer => {
-                if (layer.hasOwnProperty('lineWidth')) layer.lineWidth = value;
+                if (layer.hasOwnProperty('lineWidth')) {
+                    layer.lineWidth = value;
+                    if (canvasState.tileManager) {
+                        canvasState.tileManager.invalidateLayer(layer, canvasState);
+                    }
+                }
             });
             redrawCallback();
         }
-        
+
         clearTimeout(saveStateTimeout);
         if (save) {
             saveStateTimeout = setTimeout(() => {
@@ -349,12 +638,20 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
             const button = e.target.closest('button');
             if (!button) return;
 
+            const activeProp = canvasState.activeTool === 'eraser' ? canvasState.activeEraserWidth : canvasState.activeLineWidth;
             if (button.dataset.action === 'increase-width') {
-                handleLineWidthChange(canvasState.activeLineWidth + 1, true);
+                handleLineWidthChange(activeProp + 1, true);
             } else if (button.dataset.action === 'decrease-width') {
-                handleLineWidthChange(canvasState.activeLineWidth - 1, true);
+                handleLineWidthChange(activeProp - 1, true);
             } else if (button.dataset.preset) {
-                handleLineWidthChange(button.dataset.preset, true);
+                let presetValue = parseInt(button.dataset.preset, 10);
+                if (canvasState.activeTool === 'eraser') {
+                    // Map S (2) -> 10, M (8) -> 40, L (16) -> 80
+                    if (presetValue === 2) presetValue = 10;
+                    else if (presetValue === 8) presetValue = 40;
+                    else if (presetValue === 16) presetValue = 80;
+                }
+                handleLineWidthChange(presetValue, true);
             }
         });
     });
@@ -399,9 +696,10 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
             document.addEventListener('pointerup', onSliderUp);
         });
     });
-    
+
     window.addEventListener('changeLineWidth', (e) => {
-        const currentWidth = parseInt(canvasState.activeLineWidth, 10);
+        const activeProp = canvasState.activeTool === 'eraser' ? canvasState.activeEraserWidth : canvasState.activeLineWidth;
+        const currentWidth = parseInt(activeProp, 10);
         const step = currentWidth < 10 ? 1 : (currentWidth < 30 ? 2 : 5);
         let newWidth = e.detail.direction === 'increase' ? currentWidth + step : currentWidth - step;
         handleLineWidthChange(newWidth, true);
@@ -415,27 +713,30 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
             const newActiveButton = options.querySelector(`[data-style="${newStyle}"]`);
             if (newActiveButton) newActiveButton.classList.add('active');
         });
-        
+
         if (button) {
             const newIconSVG = button.innerHTML;
             if (lineStyleBtn) lineStyleBtn.innerHTML = newIconSVG;
             if (mobileStyleBtn) mobileStyleBtn.innerHTML = newIconSVG;
         }
-        
+
         if (canvasState.selectedLayers.length > 0) {
             const shapes3DOrder = ['sphere', 'cone', 'parallelepiped', 'pyramid', 'frustum', 'truncated-pyramid', 'truncated-sphere'];
             canvasState.selectedLayers.forEach(layer => {
                 if (layer.hasOwnProperty('lineWidth') && !shapes3DOrder.includes(layer.type)) {
                     layer.lineStyle = newStyle;
+                    if (canvasState.tileManager) {
+                        canvasState.tileManager.invalidateLayer(layer, canvasState);
+                    }
                 }
             });
             redrawCallback();
             handlers.performSaveState(canvasState.layers);
         }
-        
+
         if (lineStyleContainer) lineStyleContainer.classList.remove('active');
     }
-    
+
     lineStyleOptions.addEventListener('click', (e) => {
         const button = e.target.closest('button');
         if (!button || button.disabled) return;
@@ -455,8 +756,15 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
         });
     }
 
+    if (desktopFillColorBtn && desktopFillColorContainer) {
+        desktopFillColorBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleDropdown(desktopFillColorContainer);
+        });
+    }
+
     document.getElementById('toggleToolbar').addEventListener('click', () => { toolbarWrapper.classList.toggle('collapsed'); });
-    
+
     const logo = document.getElementById('logo');
     const settingsMenu = document.getElementById('settingsMenu');
     const clearCanvasBtn = document.getElementById('clearCanvas');
@@ -465,19 +773,33 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
     const confirmClearBtn = document.getElementById('confirmClearBtn');
     const cancelClearBtn = document.getElementById('cancelClearBtn');
 
-    logo.addEventListener('click', (e) => { 
-        e.stopPropagation(); 
-        settingsMenu.style.display = settingsMenu.style.display === 'block' ? 'none' : 'block'; 
+    logo.addEventListener('click', (e) => {
+        e.stopPropagation();
+        settingsMenu.classList.toggle('visible');
     });
+
+    const findDrawingsBtn = document.getElementById('findDrawingsBtn');
+    if (findDrawingsBtn) {
+        findDrawingsBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            settingsMenu.classList.remove('visible');
+            if (canvasState.layers.length === 0) return;
+            if (typeof canvasState.zoomToFit === 'function') {
+                canvasState.zoomToFit();
+            }
+        });
+    }
 
     clearCanvasBtn.addEventListener('click', (e) => {
         e.preventDefault();
-        settingsMenu.style.display = 'none';
+        settingsMenu.classList.remove('visible');
         confirmClearModal.classList.remove('hidden');
+        confirmClearModal.classList.add('active');
     });
-    
+
     function hideConfirmModal() {
         confirmClearModal.classList.add('hidden');
+        confirmClearModal.classList.remove('active');
     }
 
     // --- НАЧАЛО ИЗМЕНЕНИЙ ---
@@ -496,7 +818,7 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
             before: layersToDelete,
             after: [], // "После" - это пустой холст
         };
-        
+
         // Получаем функцию commitChange, привязанную в main.js
         const commitChange = canvasState.saveState;
         if (commitChange) {
@@ -506,7 +828,18 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
         // Обновляем текущее состояние приложения
         canvasState.layers = [];
         canvasState.selectedLayers = [];
-        
+
+        // Очищаем кэш тайлов и пространственную сетку
+        if (canvasState.tileManager) {
+            canvasState.tileManager.clear();
+        }
+        if (canvasState.spatialGrid) {
+            canvasState.spatialGrid = new Map();
+        }
+        if (canvasState.layerBBoxCache) {
+            canvasState.layerBBoxCache.clear();
+        }
+
         redrawCallback();
         hideConfirmModal();
     });
@@ -518,18 +851,18 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
             hideConfirmModal();
         }
     });
-    
+
     document.addEventListener('click', (e) => {
         if (!settingsMenu.contains(e.target) && e.target !== logo) {
-            settingsMenu.style.display = 'none';
+            settingsMenu.classList.remove('visible');
         }
-        
+
         const clickedInsideSubtool = allSubtoolContainers.some(c => c.contains(e.target));
         if (!clickedInsideSubtool) {
             allSubtoolContainers.forEach(c => c.classList.remove('active'));
         }
     });
-    
+
     let isDragging = false, offsetX;
     dragHandle.addEventListener('mousedown', (e) => { isDragging = true; const rect = toolbarWrapper.getBoundingClientRect(); offsetX = e.clientX - rect.left; document.body.style.userSelect = 'none'; });
     document.addEventListener('mousemove', (e) => { if (isDragging) { const toolbarWidth = toolbarWrapper.offsetWidth; const windowWidth = window.innerWidth; let newLeft = e.clientX - offsetX; if (newLeft < 0) newLeft = 0; if (newLeft + toolbarWidth > windowWidth) newLeft = windowWidth - toolbarWidth; toolbarWrapper.style.left = `${newLeft}px`; toolbarWrapper.style.transform = 'none'; } });

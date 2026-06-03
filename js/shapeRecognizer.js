@@ -31,7 +31,7 @@ function getPathLength(points) {
 /**
  * Главная и единственная функция распознавания.
  */
-export function recognizeShape(points, hasPressure) {
+export function recognizeShape(points, hasPressure, heldAtEnd = false) {
     const step = hasPressure ? 3 : 2;
     const xyPoints = [];
     for (let i = 0; i < points.length; i += step) {
@@ -49,7 +49,7 @@ export function recognizeShape(points, hasPressure) {
     const tolerance = Math.hypot(boundingBox.width, boundingBox.height) * 0.15;
     const simplifiedRaw = simplifyPath(xyPoints, tolerance);
     const vertexCount = simplifiedRaw.length / 2;
-    
+
     let scores = {
         line: 0,
         triangle: 0,
@@ -80,22 +80,27 @@ export function recognizeShape(points, hasPressure) {
             scores.ellipse = Math.max(0, 1 - averageError);
         }
     } else {
-        // --- НАЧАЛО ИЗМЕНЕНИЙ: Улучшаем логику распознавания линии ---
         if (vertexCount === 2) {
             const pathLength = getPathLength(xyPoints);
             const directDistance = Math.hypot(xyPoints[0] - xyPoints[xyPoints.length - 2], xyPoints[1] - xyPoints[xyPoints.length - 1]);
-            
+
             if (pathLength > 0) {
                 const straightness = directDistance / pathLength;
-                // Оценка зависит от прямолинейности. Только очень прямые линии получат высокий балл.
-                if (straightness > 0.98) {
-                    scores.line = 0.95;
-                } else if (straightness > 0.9) {
-                    scores.line = 0.7; // Менее прямая линия получит балл ниже порога
+                if (heldAtEnd) {
+                    // User held still at end — confirm intent, use relaxed threshold
+                    if (straightness > 0.96) {
+                        scores.line = 0.95;
+                    } else if (straightness > 0.88) {
+                        scores.line = 0.7;
+                    }
+                } else {
+                    // Normal mode — very strict, only near-perfect lines
+                    if (straightness > 0.995) {
+                        scores.line = 0.95;
+                    }
                 }
             }
         }
-        // --- КОНЕЦ ИЗМЕНЕНИЙ ---
     }
 
     let bestShape = 'none';

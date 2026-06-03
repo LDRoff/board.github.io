@@ -141,3 +141,20 @@ body.dark-theme.drag-over::before {
     background-color: rgba(26, 35, 55, 0.6);
     border-color: #87bfff;
 }
+
+/* Уменьшенные индексы для текста */
+sup, #text-editor-div sup, foreignObject sup,
+span[style*="vertical-align: super"], #text-editor-div span[style*="vertical-align: super"] {
+    font-size: 0.5em !important;
+    vertical-align: super !important;
+}
+
+sub, #text-editor-div sub, foreignObject sub,
+span[style*="vertical-align: sub"], #text-editor-div span[style*="vertical-align: sub"] {
+    font-size: 0.5em !important;
+    vertical-align: sub !important;
+}
+
+sup *, sub * {
+    font-size: inherit !important;
+}
