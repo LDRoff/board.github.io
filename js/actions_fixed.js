@@ -156,7 +156,7 @@ export function handleMove(state, pos, event) {
                 }
             }); 
         }
-        else if (layer.type === 'line') { 
+        else if (layer.type === 'line' || layer.type === 'arrow') { 
             layer.x1 = originalLayer.x1 + dx; layer.y1 = originalLayer.y1 + dy; 
             layer.x2 = originalLayer.x2 + dx; layer.y2 = originalLayer.y2 + dy; 
         }
@@ -309,7 +309,7 @@ export function handleScale(state, pos, event) {
         }
         else if (layer.type === 'path') { layer.points = originalLayer.points.map(p => ({ x: finalBoxTopLeft.x + (p.x - oBox.x) * scaleX, y: finalBoxTopLeft.y + (p.y - oBox.y) * scaleY })); }
         else if (layer.type === 'curve') { layer.nodes = originalLayer.nodes.map(node => ({ p: { x: finalBoxTopLeft.x + (node.p.x - oBox.x) * scaleX, y: finalBoxTopLeft.y + (node.p.y - oBox.y) * scaleY }, h1: node.h1 ? { x: finalBoxTopLeft.x + (node.h1.x - oBox.x) * scaleX, y: finalBoxTopLeft.y + (node.h1.y - oBox.y) * scaleY } : null, h2: node.h2 ? { x: finalBoxTopLeft.x + (node.h2.x - oBox.x) * scaleX, y: finalBoxTopLeft.y + (node.h2.y - oBox.y) * scaleY } : null, type: node.type })); }
-        else if (layer.type === 'line') { layer.x1 = finalBoxTopLeft.x + (originalLayer.x1 - oBox.x) * scaleX; layer.y1 = finalBoxTopLeft.y + (originalLayer.y1 - oBox.y) * scaleY; layer.x2 = finalBoxTopLeft.x + (originalLayer.x2 - oBox.x) * scaleX; layer.y2 = finalBoxTopLeft.y + (originalLayer.y2 - oBox.y) * scaleY; }
+        else if (layer.type === 'line' || layer.type === 'arrow') { layer.x1 = finalBoxTopLeft.x + (originalLayer.x1 - oBox.x) * scaleX; layer.y1 = finalBoxTopLeft.y + (originalLayer.y1 - oBox.y) * scaleY; layer.x2 = finalBoxTopLeft.x + (originalLayer.x2 - oBox.x) * scaleX; layer.y2 = finalBoxTopLeft.y + (originalLayer.y2 - oBox.y) * scaleY; }
         else if (['pyramid', 'truncated-pyramid'].includes(layer.type)) {
             if (layer.apex) { layer.apex = { x: finalBoxTopLeft.x + (originalLayer.apex.x - oBox.x) * scaleX, y: finalBoxTopLeft.y + (originalLayer.apex.y - oBox.y) * scaleY }; }
             ['base', 'top'].forEach(part => { if(layer[part]) { Object.keys(layer[part]).forEach(p => { layer[part][p] = { x: finalBoxTopLeft.x + (originalLayer[part][p].x - oBox.x) * scaleX, y: finalBoxTopLeft.y + (originalLayer[part][p].y - oBox.y) * scaleY }; }); } });
@@ -405,7 +405,7 @@ export function handleMovePivot(state, pos) {
             if (node.h1) node.h1 = applyOffset(originalNode.h1, { x: dx, y: dy });
             if (node.h2) node.h2 = applyOffset(originalNode.h2, { x: dx, y: dy });
         });
-    } else if (layer.type === 'line') {
+    } else if (layer.type === 'line' || layer.type === 'arrow') {
         layer.x1 = originalLayer.x1 + dx; layer.y1 = originalLayer.y1 + dy;
         layer.x2 = originalLayer.x2 + dx; layer.y2 = originalLayer.y2 + dy;
     } else if (['pyramid', 'truncated-pyramid'].includes(layer.type)) {
