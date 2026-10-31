@@ -1,19 +1,30 @@
+<!-- --- START OF FILE index.html --- -->
+
 <!DOCTYPE html>
 <html lang="ru">
+
 <head>
+    <!-- ... (head content без изменений) ... -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Интерактивная доска</title>
-    <link rel="stylesheet" href="css/theme.css">
-    <link rel="stylesheet" href="css/base.css">
-    <link rel="stylesheet" href="css/toolbar.css">
-    <link rel="stylesheet" href="css/modal.css">
-    <link rel="stylesheet" href="css/components.css">
-    <link rel="stylesheet" href="css/utils.css">
+    <title>repitorium.ru</title>
+    <link rel="icon" type="image/webp" href="icons_bord/icon-profile.webp?v=1.1.8">
+    <link rel="stylesheet" href='css/theme.css?v=1.1.8'>
+    <link rel="stylesheet" href='css/base.css?v=1.1.8'>
+    <link rel="stylesheet" href='css/toolbar.css?v=1.1.8'>
+    <link rel="stylesheet" href='css/modal.css?v=1.1.8'>
+    <link rel="stylesheet" href='css/components.css?v=1.1.8'>
+    <link rel="stylesheet" href='css/utils.css?v=1.1.8'>
+    <link rel="stylesheet" href='css/sticker.css?v=1.1.8'>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Lora:ital,wght@0,400;0,700;1,400&family=Montserrat:wght@400;700&family=Oswald:wght@400;700&family=Roboto:ital,wght@0,400;0,700;1,400&family=Fira+Code&display=swap" rel="stylesheet">
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
 
     <style>
-        /* Оверлей для центрирования анимации поверх всего */
+        /* ... (стили лоадера без изменений) ... */
         #loader-overlay {
             position: fixed;
             top: 0;
@@ -23,242 +34,700 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            background-color: #f0f2f5;
-            z-index: 20000; /* Высший z-index, чтобы быть поверх всего */
-            transition: opacity 0.5s ease-out; /* Плавное исчезновение */
+            background-color: #f4f4f8;
+            z-index: 20000;
+            transition: opacity 0.5s ease-out;
+            overflow: hidden;
         }
 
-        /* Класс для скрытия оверлея */
         #loader-overlay.hidden {
             opacity: 0;
-            pointer-events: none; /* Отключаем взаимодействие после скрытия */
+            pointer-events: none;
         }
-        
+
         .dark-theme #loader-overlay {
-             background-color: #1a2337;
+            background-color: #1a2337;
         }
 
-        .spinner {
-            animation: rotate 2s linear infinite;
-            width: 65px;
-            height: 65px;
-        }
-
-        .path {
-            stroke: #3498db; 
-            stroke-linecap: round; 
-            animation: dash 1.5s ease-in-out infinite;
-        }
-
-        @keyframes rotate {
-            100% {
-                transform: rotate(360deg);
-            }
-        }
-
-        @keyframes dash {
-            0% {
-                stroke-dasharray: 1, 150;
-                stroke-dashoffset: 0;
-            }
-            50% {
-                stroke-dasharray: 90, 150;
-                stroke-dashoffset: -35;
-            }
-            100% {
-                stroke-dasharray: 90, 150;
-                stroke-dashoffset: -124;
-            }
+        #preloader-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
         }
     </style>
 </head>
+
 <body>
+    <!-- ... (loader, top-right, canvas elements без изменений) ... -->
     <div id="loader-overlay">
-        <svg class="spinner" viewBox="0 0 50 50">
-            <circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle>
-        </svg>
+        <canvas id="preloader-canvas"></canvas>
     </div>
+    <script>
+        (function() {
+            const canvas = document.getElementById('preloader-canvas');
+            const ctx = canvas.getContext('2d');
+
+            let width, height;
+            let balls = [];
+
+            // Матовые, приятные цвета для светлого фона
+            const COLORS = ['#FF4B4B', '#FF9F1C', '#2EC4B6', '#3A86FF', '#8338EC'];
+
+            class Ball {
+                constructor(x, y, radius, color) {
+                    this.x = x;
+                    this.y = y;
+                    this.radius = radius;
+                    this.color = color;
+                    
+                    // Случайная гравитация и базовая сила отскока при создании
+                    this.gravity = 0.3 + Math.random() * 0.2; 
+                    this.baseBounce = 9 + Math.random() * 5; 
+                    this.vy = 0;
+                    
+                    // Для деформации (сквош)
+                    this.squishX = 1;
+                    this.squishY = 1;
+                }
+
+                update(stickY) {
+                    this.vy += this.gravity;
+                    this.y += this.vy;
+
+                    // Вытягивание в полете
+                    let stretch = Math.abs(this.vy) * 0.02;
+                    let targetSquishX = 1 - stretch * 0.4;
+                    let targetSquishY = 1 + stretch;
+
+                    // Столкновение с палочкой
+                    if (this.y + this.radius >= stickY && this.vy > 0) {
+                        this.y = stickY - this.radius;
+                        
+                        // КЛЮЧЕВОЙ МОМЕНТ: небольшая случайность при КАЖДОМ ударе.
+                        // Это ломает любой математический паттерн и делает прыжки хаотичными.
+                        let currentBounce = this.baseBounce + (Math.random() * 1.5 - 0.75);
+                        this.vy = -currentBounce; 
+
+                        // Сплющивание при ударе
+                        this.squishX = 1.4;
+                        this.squishY = 0.6;
+                    } else {
+                        // Возвращение к обычной форме
+                        this.squishX += (targetSquishX - this.squishX) * 0.2;
+                        this.squishY += (targetSquishY - this.squishY) * 0.2;
+                    }
+                }
+
+                draw(ctx) {
+                    ctx.save();
+                    
+                    ctx.translate(this.x, this.y + this.radius);
+                    ctx.scale(this.squishX, this.squishY);
+                    
+                    ctx.beginPath();
+                    ctx.arc(0, -this.radius, this.radius, 0, Math.PI * 2);
+                    
+                    // Чистая плоская заливка без теней и неона
+                    ctx.fillStyle = this.color;
+                    ctx.fill();
+                    
+                    ctx.restore();
+                }
+            }
+
+            function drawStick() {
+                let stickWidth = Math.min(350, width * 0.8);
+                let stickX = width / 2;
+                let stickY = height / 2;
+
+                ctx.save();
+                
+                let isDark = document.body.classList.contains('dark-theme');
+                
+                // Серый градиент для палочки на светлом фоне
+                let grad = ctx.createLinearGradient(stickX - stickWidth/2, 0, stickX + stickWidth/2, 0);
+                if (isDark) {
+                    grad.addColorStop(0, 'rgba(200, 200, 220, 0)');
+                    grad.addColorStop(0.15, 'rgba(180, 180, 190, 0.7)');
+                    grad.addColorStop(0.5, 'rgba(140, 140, 150, 1)');
+                    grad.addColorStop(0.85, 'rgba(180, 180, 190, 0.7)');
+                    grad.addColorStop(1, 'rgba(200, 200, 220, 0)');
+                } else {
+                    grad.addColorStop(0, 'rgba(180, 180, 190, 0)');
+                    grad.addColorStop(0.15, 'rgba(160, 160, 170, 0.7)');
+                    grad.addColorStop(0.5, 'rgba(120, 120, 130, 1)');
+                    grad.addColorStop(0.85, 'rgba(160, 160, 170, 0.7)');
+                    grad.addColorStop(1, 'rgba(180, 180, 190, 0)');
+                }
+
+                ctx.beginPath();
+                ctx.moveTo(stickX - stickWidth/2, stickY);
+                ctx.lineTo(stickX + stickWidth/2, stickY);
+                
+                ctx.strokeStyle = grad;
+                ctx.lineWidth = 3;
+                ctx.lineCap = 'round';
+                ctx.stroke();
+
+                ctx.restore();
+            }
+
+            function init() {
+                let dpr = window.devicePixelRatio || 1;
+                width = window.innerWidth;
+                height = window.innerHeight;
+                canvas.width = width * dpr;
+                canvas.height = height * dpr;
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.scale(dpr, dpr);
+
+                balls = [];
+                
+                let stickWidth = Math.min(350, width * 0.8);
+                let availableWidth = stickWidth * 0.7; // Занимаем 70% длины
+                let spacing = availableWidth / (COLORS.length - 1);
+                let startX = (width / 2) - (availableWidth / 2);
+                let stickY = height / 2;
+                
+                let ballRadius = 7;
+
+                // Создаем шарики
+                COLORS.forEach((color, index) => {
+                    let x = startX + (index * spacing);
+                    let startY = stickY - 20 - (Math.random() * 150); 
+                    balls.push(new Ball(x, startY, ballRadius, color));
+                });
+            }
+
+            function animate() {
+                ctx.clearRect(0, 0, width, height);
+
+                ctx.save();
+                
+                let isMobile = width < 768;
+                if (isMobile) {
+                    // Масштабируем анимацию на мобильных экранах (делаем меньше)
+                    ctx.translate(width / 2, height / 2);
+                    ctx.scale(0.65, 0.65);
+                    ctx.translate(-width / 2, -height / 2);
+                }
+
+                drawStick();
+
+                let stickY = height / 2;
+                balls.forEach(ball => {
+                    ball.update(stickY);
+                    ball.draw(ctx);
+                });
+
+                ctx.restore();
+
+                // Отрисовка текста загрузки
+                let isDark = document.body.classList.contains('dark-theme');
+                ctx.save();
+                ctx.fillStyle = isDark ? '#8b92a5' : '#8c8c9e';
+                ctx.textAlign = 'center';
+                
+                if (isMobile) {
+                    ctx.font = '500 13px "Inter", sans-serif';
+                    ctx.fillText("Подождите немного,", width / 2, height / 2 + 55);
+                    ctx.fillText("загружаем элементы доски...", width / 2, height / 2 + 75);
+                } else {
+                    ctx.font = '500 15px "Inter", sans-serif';
+                    ctx.fillText("Подождите немного, загружаем элементы доски...", width / 2, height / 2 + 70);
+                }
+                
+                ctx.restore();
+
+                window._preloaderAnimationId = requestAnimationFrame(animate);
+            }
+
+            window.addEventListener('resize', init);
+            
+            init();
+            animate();
+        })();
+    </script>
 
     <div class="top-right-container">
         <div class="logo-container">
-            <div id="logo"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.982 18.725A7.488 7.488 0 0 0 12 15.75a7.488 7.488 0 0 0-5.982 2.975m11.963 0a9 9 0 1 0-11.963 0m11.963 0A8.966 8.966 0 0 1 12 21a8.966 8.966 0 0 1-5.982-2.275M15 9.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg></div>
+            <div id="logo"><img src="icons_bord/icon-profile.webp" class="profile-icon" alt="Профиль"></div>
             <div class="settings-menu" id="settingsMenu">
                 <input type="file" id="imageUpload" accept="image/*" hidden>
                 <input type="file" id="pdfUpload" accept=".pdf" hidden>
                 <input type="file" id="projectUpload" accept=".board" hidden>
-                <a href="#" id="saveProjectBtn">Сохранить проект</a>
-                <a href="#" id="openProjectBtn">Открыть проект</a>
-                <a href="#" id="exportJpgBtn">Экспорт в JPG</a>
-                <a href="#" id="settingsBtn">Настройки</a>
-                <a href="#" id="helpBtn">Справка</a>
-                <a href="#" id="clearCanvas">Очистить доску</a>
+
+                <div class="menu-section-label">Проект</div>
+                <a href="#" id="saveProjectBtn" class="menu-item">
+                    <img src="icons_bord/icon-save.webp" class="toolbar-icon" alt="Сохранить">
+                    Сохранить
+                </a>
+                <a href="#" id="openProjectBtn" class="menu-item">
+                    <img src="icons_bord/icon-open.webp" class="toolbar-icon" alt="Открыть">
+                    Открыть
+                </a>
+
+                <div class="menu-separator"></div>
+
+                <div class="menu-section-label">Экспорт</div>
+                <a href="#" id="exportJpgBtn" class="menu-item">
+                    <img src="icons_bord/icon-img.webp" class="toolbar-icon" alt="Экспорт в JPG">
+                    Экспорт в JPG
+                </a>
+                <a href="#" id="exportPngBtn" class="menu-item">
+                    <img src="icons_bord/icon-img.webp" class="toolbar-icon" alt="Экспорт в PNG">
+                    Экспорт в PNG
+                </a>
+                <a href="#" id="exportPdfBtn" class="menu-item">
+                    <img src="icons_bord/icon-PDF.webp" class="toolbar-icon" alt="Печать / PDF">
+                    Печать / PDF
+                </a>
+
+                <div class="menu-separator"></div>
+
+                <div class="menu-section-label">Вид</div>
+                <a href="#" id="findDrawingsBtn" class="menu-item">
+                    <img src="icons_bord/icon-search.webp" class="toolbar-icon" alt="Найти рисунки">
+                    Найти рисунки
+                </a>
+
+                <div class="menu-separator"></div>
+
+                <a href="#" id="settingsBtn" class="menu-item">
+                    <img src="icons_bord/icon-settings.webp" class="toolbar-icon" alt="Настройки">
+                    Настройки
+                </a>
+                <a href="#" id="helpBtn" class="menu-item">
+                    <img src="icons_bord/icon-qwestion.webp" class="toolbar-icon" alt="Справка">
+                    Справка
+                </a>
+                <a href="#" id="clearCanvas" class="menu-item menu-item-danger">
+                    <img src="icons_bord/icon-delete.webp" class="toolbar-icon" alt="Очистить">
+                    Очистить доску
+                </a>
             </div>
         </div>
         <div class="zoom-controls" id="zoomControls">
-            <button id="zoomInBtn" title="Приблизить (+)"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg></button>
-            <button id="zoomOutBtn" title="Отдалить (-)"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14" /></svg></button>
+            <button id="zoomInBtn" title="Приблизить (+)">
+                <img src="icons_bord/icon-plus.webp" class="toolbar-icon" alt="Приблизить">
+            </button>
+            <button id="zoomOutBtn" title="Отдалить (-)">
+                <img src="icons_bord/icon-minus.webp" class="toolbar-icon" alt="Отдалить">
+            </button>
             <button id="panBtn" data-tool="pan" title="Перемещение (H)">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 13v-2.5a1.5 1.5 0 0 1 3 0v1.5" />
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M11 8.5v-1a1.5 1.5 0 0 1 3 0v1.5" />
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M14 10.5a1.5 1.5 0 0 1 3 0v1.5" />
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M17 11.5a1.5 1.5 0 0 1 3 0v4.5a6 6 0 0 1 -6 6h-2h.208a6 6 0 0 1 -5.012 -2.7l-.196 -.3c-.312 -.479 -1.407 -2.388 -3.286 -5.728a1.5 1.5 0 0 1 .536 -2.022a1.867 1.867 0 0 1 2.28 .28l1.47 1.47" />
-                </svg>
+                <img src="icons_bord/icon-hand.webp" class="toolbar-icon" alt="Перемещение">
             </button>
         </div>
     </div>
 
     <canvas id="backgroundCanvas"></canvas>
-    <canvas id="drawingBoard" tabindex="-1"></canvas>
+    <canvas id="drawingBoard" class="cursor-brush" tabindex="-1"></canvas>
     <canvas id="cacheCanvas"></canvas>
     <canvas id="interactionCanvas"></canvas>
 
+    <div id="stickers-layer" class="stickers-layer-container">
+        <svg id="connectionsLayer" class="connections"></svg>
+    </div>
+
     <div id="floating-text-toolbar" class="floating-toolbar">
         <div class="dropdown-container" id="font-family-dropdown-container">
-            <div class="desktop-only">
-                <button id="font-family-dropdown-btn" class="toolbar-select" data-action="font-family-dropdown" title="Шрифт">
-                    <span id="font-family-display">Arial</span>
-                    <svg class="dropdown-arrow" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+            <button id="font-family-dropdown-btn" class="toolbar-select" data-action="font-family-dropdown"
+                title="Шрифт">
+                <span id="font-family-display" class="desktop-only">Arial</span>
+                <span class="mobile-only">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M5.5 17h2.25l1.12-3h6.25l1.12 3h2.25L13 3h-2L5.5 17zm4.12-5 2.38-6.38L14.38 12H9.62z"/>
+                    </svg>
+                </span>
+                <svg class="dropdown-arrow desktop-only" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                    fill="currentColor">
+                    <path d="M7 10l5 5 5-5z" />
+                </svg>
+            </button>
+            <div class="dropdown-options font-options" id="font-family-options">
+                <button data-font="'Roboto', sans-serif" style="font-family: 'Roboto', sans-serif;">Roboto</button>
+                <button data-font="'Montserrat', sans-serif" style="font-family: 'Montserrat', sans-serif;">Montserrat</button>
+                <button data-font="'Lora', serif" style="font-family: 'Lora', serif;">Lora (Serif)</button>
+                <button data-font="'Oswald', sans-serif" style="font-family: 'Oswald', sans-serif;">Oswald (Заголовок)</button>
+                <button data-font="'Caveat', cursive" style="font-family: 'Caveat', cursive;">Caveat (Рукописный)</button>
+                <button data-font="'Fira Code', monospace" style="font-family: 'Fira Code', monospace;">Fira Code</button>
+                <div class="toolbar-separator" style="margin: 4px; height: 1px; width: 90%; background: var(--glass-border);"></div>
+                <button data-font="Arial, Helvetica, sans-serif" style="font-family: Arial, Helvetica, sans-serif;">Arial</button>
+                <button data-font="Georgia, serif" style="font-family: Georgia, serif;">Georgia</button>
+                <button data-font="'Times New Roman', Times, serif" style="font-family: 'Times New Roman', Times, serif;">Times New Roman</button>
+                <button data-font="Verdana, sans-serif" style="font-family: Verdana, sans-serif;">Verdana</button>
+                <button data-font="'Courier New', Courier, monospace" style="font-family: 'Courier New', Courier, monospace;">Courier New</button>
+                <button data-font="Tahoma, Geneva, sans-serif" style="font-family: Tahoma, Geneva, sans-serif;">Tahoma</button>
+                <button data-font="'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif" style="font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;">Trebuchet MS</button>
+                <button data-font="Impact, Charcoal, sans-serif" style="font-family: Impact, Charcoal, sans-serif;">Impact</button>
+                <button data-font="'Comic Sans MS', cursive, sans-serif" style="font-family: 'Comic Sans MS', cursive, sans-serif;">Comic Sans MS</button>
+            </div>
+        </div>
+
+        <input type="number" id="floatingFontSizeInput" class="toolbar-font-size" min="1" max="1000" value="30"
+            title="Размер шрифта">
+        
+        <div class="toolbar-separator"></div>
+
+        <div class="dropdown-container" id="style-dropdown-container">
+            <button id="style-dropdown-btn" data-action="style-dropdown" title="Стиль текста">
+                <img src="icons_bord/icon-zirniy.webp" class="toolbar-icon" alt="Стили">
+            </button>
+            <div class="dropdown-options" id="style-options">
+                <button data-action="font-bold" title="Полужирный (Ctrl+B)">
+                    <img src="icons_bord/icon-zirniy.webp" class="toolbar-icon" alt="Жирный">
+                </button>
+                <button data-action="font-italic" title="Курсив (Ctrl+I)">
+                    <img src="icons_bord/icon-cursive.webp" class="toolbar-icon" alt="Курсив">
+                </button>
+                <button data-action="font-underline" title="Подчеркнутый (Ctrl+U)">
+                    <img src="icons_bord/icon-podcherk.webp" class="toolbar-icon" alt="Подчеркнутый">
+                </button>
+                <button data-action="font-strike" title="Зачеркнутый">
+                    <img src="icons_bord/icon-zacherk.webp" class="toolbar-icon" alt="Зачеркнутый">
+                </button>
+                <button data-action="text-transform" title="Сменить регистр">
+                    <img src="icons_bord/icon-registr.webp" class="toolbar-icon" alt="Регистр">
                 </button>
             </div>
+        </div>
 
-            <div class="mobile-only">
-                <button id="mobile-font-family-dropdown-btn" data-action="font-family-dropdown" title="Шрифт">
+        <div class="dropdown-container" id="index-dropdown-container">
+            <button id="index-dropdown-btn" data-action="index-dropdown" title="Индексы">
+                <img src="icons_bord/icon-nadstrochn.webp" class="toolbar-icon" alt="Индексы">
+            </button>
+            <div class="dropdown-options" id="index-options">
+                <button data-action="font-superscript" title="Верхний индекс">
+                    <img src="icons_bord/icon-nadstrochn.webp" class="toolbar-icon" alt="Надстрочный">
+                </button>
+                <button data-action="font-subscript" title="Нижний индекс">
+                    <img src="icons_bord/icon-podstrochn.webp" class="toolbar-icon" alt="Подстрочный">
+                </button>
+            </div>
+        </div>
+
+        <div class="dropdown-container" id="align-dropdown-container">
+            <button id="align-dropdown-btn" data-action="align-dropdown" title="Выравнивание текста">
+                <img src="icons_bord/icon-leftravn.webp" class="toolbar-icon" alt="Выравнивание">
+            </button>
+            <div class="dropdown-options" id="align-options">
+                <button data-action="align-left" title="По левому краю">
+                    <img src="icons_bord/icon-leftravn.webp" class="toolbar-icon" alt="По левому краю">
+                </button>
+                <button data-action="align-center" title="По центру">
+                    <img src="icons_bord/icon-center.webp" class="toolbar-icon" alt="По центру">
+                </button>
+                <button data-action="align-right" title="По правому краю">
+                    <img src="icons_bord/icon-rightravn.webp" class="toolbar-icon" alt="По правому краю">
+                </button>
+            </div>
+        </div>
+
+        <div class="dropdown-container" id="list-dropdown-container">
+            <button id="list-dropdown-btn" data-action="list-dropdown" title="Списки">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M4 6h2v2H4zm0 5h2v2H4zm0 5h2v2H4zm4-10h12v2H8zm0 5h12v2H8zm0 5h12v2H8z"/>
+                </svg>
+            </button>
+            <div class="dropdown-options" id="list-options">
+                <button data-action="list-bullet" title="Маркированный список">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M10.2,4.5L5,19h2.3l1.1-3h5.2l1.1,3h2.3L12.8,4.5h-2.6z M8.9,14.5l1.6-4.5l1.6,4.5H8.9z M20,19v-5.2c0-1.4-0.8-2.3-2.3-2.3c-1.5,0-2.3,0.9-2.3,2.3v0.7h1.5v-0.7c0-0.7,0.3-1,0.8-1s0.8,0.3,0.8,1v1c-1-0.3-2,0-2.6,0.6C15.3,14.9,15,15.7,15,16.8V19h1.5v-2.2c0-0.8,0.3-1.1,0.8-1.1c0.5,0,0.8,0.3,0.8,1.1V19H20z"/>
+                        <path d="M4 6h2v2H4zm0 5h2v2H4zm0 5h2v2H4zm4-10h12v2H8zm0 5h12v2H8zm0 5h12v2H8z"/>
+                    </svg>
+                </button>
+                <button data-action="list-number" title="Нумерованный список">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M3 5h2v2H3zm0 5h2v2H3zm0 5h2v2H3zm4-10h14v2H7zm0 5h14v2H7zm0 5h14v2H7z"/>
+                        <text x="3" y="7" font-size="7" font-family="Arial" font-weight="bold">1</text>
+                        <text x="3" y="12" font-size="7" font-family="Arial" font-weight="bold">2</text>
+                        <text x="3" y="17" font-size="7" font-family="Arial" font-weight="bold">3</text>
                     </svg>
                 </button>
             </div>
-            
-            <div class="dropdown-options font-options" id="font-family-options">
-                <button data-font="Arial" style="font-family: Arial;">Arial</button>
-                <button data-font="Georgia" style="font-family: Georgia;">Georgia</button>
-                <button data-font="Times New Roman" style="font-family: 'Times New Roman';">Times New Roman</button>
-                <button data-font="Verdana" style="font-family: Verdana;">Verdana</button>
-                <button data-font="Courier New" style="font-family: 'Courier New';">Courier New</button>
-            </div>
         </div>
 
-        <input type="number" id="floatingFontSizeInput" class="toolbar-font-size" min="1" max="200" value="30" title="Размер шрифта">
-        <div class="toolbar-separator desktop-only"></div>
-
-        <button data-action="font-bold" title="Полужирный" class="desktop-only">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M8 11H13.5C14.3284 11 15 11.6716 15 12.5C15 13.3284 14.3284 14 13.5 14H8V11ZM8 6H12.5C13.3284 6 14 6.67157 14 7.5C14 8.32843 13.3284 9 12.5 9H8V6ZM6 4V16H13.5C15.433 16 17 14.433 17 12.5C17 10.8123 15.8099 9.3802 14.25 9.0625C15.441 8.53906 16 7.35938 16 6.5C16 4.567 14.433 4 12.5 4H6Z"/></svg>
-        </button>
-        <button data-action="font-italic" title="Курсив" class="desktop-only">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4V7H12.21L8.79 15H6V18H14V15H11.79L15.21 7H18V4H10Z"/></svg>
-        </button>
-        <button data-action="font-underline" title="Подчеркнутый" class="desktop-only">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M8 3V11C8 13.2091 9.79086 15 12 15C14.2091 15 16 13.2091 16 11V3H18V11C18 14.3137 15.3137 17 12 17C8.68629 17 6 14.3137 6 11V3H8ZM4 19H20V21H4V19Z"/></svg>
-        </button>
-        <div class="toolbar-separator desktop-only"></div>
-        <button data-action="align-left" title="По левому краю" class="desktop-only">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4H21V6H3V4ZM3 9H15V11H3V9ZM3 14H21V16H3V14ZM3 19H15V21H3V19Z"/></svg>
-        </button>
-        <button data-action="align-center" title="По центру" class="desktop-only">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4H21V6H3V4ZM7 9H17V11H7V9ZM3 14H21V16H3V14ZM7 19H17V21H7V19Z"/></svg>
-        </button>
-        <button data-action="align-right" title="По правому краю" class="desktop-only">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4H21V6H3V4ZM9 9H21V11H9V9ZM3 14H21V16H3V14ZM9 19H21V21H9V19Z"/></svg>
-        </button>
-        
-        <div class="mobile-only dropdown-container" id="style-dropdown-container">
-            <button id="style-dropdown-btn" data-action="style-dropdown" title="Стиль текста">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M8 11H13.5C14.3284 11 15 11.6716 15 12.5C15 13.3284 14.3284 14 13.5 14H8V11ZM8 6H12.5C13.3284 6 14 6.67157 14 7.5C14 8.32843 13.3284 9 12.5 9H8V6ZM6 4V16H13.5C15.433 16 17 14.433 17 12.5C17 10.8123 15.8099 9.3802 14.25 9.0625C15.441 8.53906 16 7.35938 16 6.5C16 4.567 14.433 4 12.5 4H6Z"/></svg>
-            </button>
-            <div class="dropdown-options" id="style-options">
-                <button data-action="font-bold" title="Полужирный"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M8 11H13.5C14.3284 11 15 11.6716 15 12.5C15 13.3284 14.3284 14 13.5 14H8V11ZM8 6H12.5C13.3284 6 14 6.67157 14 7.5C14 8.32843 13.3284 9 12.5 9H8V6ZM6 4V16H13.5C15.433 16 17 14.433 17 12.5C17 10.8123 15.8099 9.3802 14.25 9.0625C15.441 8.53906 16 7.35938 16 6.5C16 4.567 14.433 4 12.5 4H6Z"/></svg></button>
-                <button data-action="font-italic" title="Курсив"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4V7H12.21L8.79 15H6V18H14V15H11.79L15.21 7H18V4H10Z"/></svg></button>
-                <button data-action="font-underline" title="Подчеркнутый"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M8 3V11C8 13.2091 9.79086 15 12 15C14.2091 15 16 13.2091 16 11V3H18V11C18 14.3137 15.3137 17 12 17C8.68629 17 6 14.3137 6 11V3H8ZM4 19H20V21H4V19Z"/></svg></button>
-            </div>
-        </div>
-        <div class="mobile-only dropdown-container" id="align-dropdown-container">
-            <button id="align-dropdown-btn" data-action="align-dropdown" title="Выравнивание текста">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4H21V6H3V4ZM3 9H15V11H3V9ZM3 14H21V16H3V14ZM3 19H15V21H3V19Z"></path></svg>
-            </button>
-            <div class="dropdown-options" id="align-options">
-                <button data-action="align-left" title="По левому краю"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4H21V6H3V4ZM3 9H15V11H3V9ZM3 14H21V16H3V14ZM3 19H15V21H3V19Z"/></svg></button>
-                <button data-action="align-center" title="По центру"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4H21V6H3V4ZM7 9H17V11H7V9ZM3 14H21V16H3V14ZM7 19H17V21H7V19Z"/></svg></button>
-                <button data-action="align-right" title="По правому краю"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4H21V6H3V4ZM9 9H21V11H9V9ZM3 14H21V16H3V14ZM9 19H21V21H9V19Z"/></svg></button>
-            </div>
-        </div>
         <div class="toolbar-separator"></div>
+
         <div id="floating-color-picker" class="color-picker-wrapper">
-             <button data-action="pick-color" title="Цвет текста">
+            <button data-action="pick-color" title="Цвет текста">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-                    <circle cx="12" cy="12" r="10" stroke="#888" stroke-width="1.5" />
+                    <circle cx="12" cy="12" r="10" stroke="#888" stroke-width="1.5" fill="currentColor" />
                 </svg>
             </button>
             <div id="floatingColorPalette" class="floating-palette">
             </div>
         </div>
-        <div class="toolbar-separator"></div>
+
+        <div id="floating-bg-color-picker" class="color-picker-wrapper">
+            <button data-action="pick-bg-color" title="Цвет маркера (фон текста)">
+                <img src="icons_bord/icon-marker.webp" class="toolbar-icon" alt="Маркер">
+            </button>
+            <div id="floatingBgColorPalette" class="floating-palette">
+            </div>
+        </div>
         <button data-action="copy" title="Копировать (Ctrl+C)">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4V2H17V4H20C20.5523 4 21 4.44772 21 5V21C21 21.5523 20.5523 22 20 22H10C9.44772 22 9 21.5523 9 21V5C9 4.44772 9.44772 4 10 4H7ZM11 6V20H19V6H11ZM8 7H4C3.44772 7 3 7.44772 3 8V22C3 22.5523 3.44772 23 4 23H14C14.5523 23 15 22.5523 15 22V21H9V7H8Z"></path></svg>
+            <img src="icons_bord/icon-copy.webp" class="toolbar-icon" alt="Копировать">
         </button>
-        <div class="toolbar-separator"></div>
         <button data-action="delete" title="Удалить">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7 6V3C7 2.44772 7.44772 2 8 2H16C16.5523 2 17 2.44772 17 3V6H22V8H20V21C20 21.5523 19.5523 22 19 22H5C4.44772 22 4 21.5523 4 21V8H2V6H7ZM9 4V6H15V4H9Z"></path></svg>
+            <img src="icons_bord/icon-delete.webp" class="toolbar-icon" alt="Удалить">
         </button>
+    </div>
+
+    <div id="floatingStickerToolbar" class="floating-toolbar" style="display: none;">
+         <!-- Shape Dropdown -->
+         <div class="dropdown-container">
+             <button title="Форма" class="dropdown-trigger-btn">
+                 <img src="icons_bord/icon-2D.webp" class="toolbar-icon" alt="Форма">
+             </button>
+             <div class="dropdown-options">
+                 <button onclick="window.stickerApp.changeStickerShape('rect')" title="Прямоугольник">
+                     <img src="icons_bord/icon-kvadrat.webp" class="toolbar-icon" alt="Прямоугольник">
+                 </button>
+                 <button onclick="window.stickerApp.changeStickerShape('circle')" title="Круг">
+                     <img src="icons_bord/icon-krug.webp" class="toolbar-icon" alt="Круг">
+                 </button>
+                 <button onclick="window.stickerApp.changeStickerShape('rhombus')" title="Ромб">
+                     <img src="icons_bord/icon-romb.webp" class="toolbar-icon" alt="Ромб">
+                 </button>
+             </div>
+         </div>
+
+         <!-- Color Dropdown -->
+         <div class="dropdown-container">
+             <button id="stickerColorDropdownBtn" title="Цвет" class="dropdown-trigger-btn">
+                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="width: 20px; height: 20px; display: block;">
+                     <circle id="stickerColorDropdownCircle" cx="12" cy="12" r="10" stroke="#888" stroke-width="1.5" fill="currentColor" />
+                 </svg>
+             </button>
+             <div class="dropdown-options">
+                 <button onclick="window.stickerApp.changeStickerColor('#ffffff')" class="color-dot" style="background-color: #ffffff;" data-color="#ffffff"></button>
+                 <button onclick="window.stickerApp.changeStickerColor('#fef08a')" class="color-dot" style="background-color: #fef08a;" data-color="#fef08a"></button>
+                 <button onclick="window.stickerApp.changeStickerColor('#a7f3d0')" class="color-dot" style="background-color: #a7f3d0;" data-color="#a7f3d0"></button>
+                 <button onclick="window.stickerApp.changeStickerColor('#bfdbfe')" class="color-dot" style="background-color: #bfdbfe;" data-color="#bfdbfe"></button>
+                 <button onclick="window.stickerApp.changeStickerColor('#fbcfe8')" class="color-dot" style="background-color: #fbcfe8;" data-color="#fbcfe8"></button>
+             </div>
+         </div>
+         
+         <div class="toolbar-separator"></div>
+
+         <!-- Image Add/Delete Dual Button -->
+         <button id="stickerImageBtn" onclick="window.stickerApp.handleImageBtnClick(event)" title="Добавить фото">
+             <img id="stickerImageIcon" src="icons_bord/icon-img.webp" class="toolbar-icon" alt="Фото">
+             <input type="file" id="stickerFileInput" accept="image/*" class="sticker-hidden-input" onchange="window.stickerApp.handleImageUpload(event)" style="display: none;">
+         </button>
+
+         <button id="stickerEditBtn" onclick="window.stickerApp.toggleStickerAnnotationsEditing(event)" title="Редактировать нарисованное">
+             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="toolbar-icon" style="width:20px; height:20px; display:block; color: var(--text-secondary);">
+                 <path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
+             </svg>
+         </button>
+
+         <!-- Consolidated Text Styles Dropdown -->
+         <div class="dropdown-container">
+             <button title="Стиль текста" class="dropdown-trigger-btn">
+                 <img src="icons_bord/icon-zirniy.webp" class="toolbar-icon" alt="Стили">
+             </button>
+             <div class="dropdown-options">
+                 <button onmousedown="event.preventDefault(); document.execCommand('bold', false, null)" title="Жирный">
+                     <img src="icons_bord/icon-zirniy.webp" class="toolbar-icon" alt="Жирный">
+                 </button>
+                 <button onmousedown="event.preventDefault(); document.execCommand('italic', false, null)" title="Курсив">
+                     <img src="icons_bord/icon-cursive.webp" class="toolbar-icon" alt="Курсив">
+                 </button>
+                 <button onmousedown="event.preventDefault(); document.execCommand('underline', false, null)" title="Подчеркнутый">
+                     <img src="icons_bord/icon-podcherk.webp" class="toolbar-icon" alt="Подчеркнутый">
+                 </button>
+                 <button onmousedown="event.preventDefault(); document.execCommand('strikeThrough', false, null)" title="Зачеркнутый">
+                     <img src="icons_bord/icon-zacherk.webp" class="toolbar-icon" alt="Зачеркнутый">
+                 </button>
+                 <button onmousedown="event.preventDefault(); document.execCommand('superscript', false, null)" title="Надстрочный">
+                     <img src="icons_bord/icon-nadstrochn.webp" class="toolbar-icon" alt="Надстрочный">
+                 </button>
+                 <button onmousedown="event.preventDefault(); document.execCommand('subscript', false, null)" title="Подстрочный">
+                     <img src="icons_bord/icon-podstrochn.webp" class="toolbar-icon" alt="Подстрочный">
+                 </button>
+             </div>
+         </div>
+
+         <div class="toolbar-separator"></div>
+
+         <button onclick="window.stickerApp.deleteSelectedSticker()" title="Удалить стикер" data-action="delete">
+             <img src="icons_bord/icon-delete.webp" class="toolbar-icon" alt="Удалить">
+         </button>
+    </div>
+
+    <!-- Floating Connection Link Toolbar -->
+    <div id="floatingLinkToolbar" class="floating-toolbar" style="display: none;">
+         <!-- Line Style -->
+         <div class="dropdown-container">
+             <button title="Стиль линии" class="dropdown-trigger-btn">
+                 <img src="icons_bord/icon-tolshina.webp" class="toolbar-icon" alt="Стиль линии">
+             </button>
+             <div class="dropdown-options">
+                 <button onclick="window.stickerApp.changeLinkStyle('solid')" title="Сплошная" style="padding: 4px 8px; width: auto; height: auto;">
+                     <svg width="40" height="12" viewBox="0 0 40 12" fill="none"><line x1="0" y1="6" x2="40" y2="6" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+                 </button>
+                 <button onclick="window.stickerApp.changeLinkStyle('dashed')" title="Пунктир" style="padding: 4px 8px; width: auto; height: auto;">
+                     <svg width="40" height="12" viewBox="0 0 40 12" fill="none"><line x1="0" y1="6" x2="40" y2="6" stroke="currentColor" stroke-width="3" stroke-dasharray="6 4" stroke-linecap="round"/></svg>
+                 </button>
+                 <button onclick="window.stickerApp.changeLinkStyle('dotted')" title="Точки" style="padding: 4px 8px; width: auto; height: auto;">
+                     <svg width="40" height="12" viewBox="0 0 40 12" fill="none"><line x1="0" y1="6" x2="40" y2="6" stroke="currentColor" stroke-width="3" stroke-dasharray="1 6" stroke-linecap="round"/></svg>
+                 </button>
+             </div>
+         </div>
+
+         <!-- Line Color -->
+         <div class="dropdown-container">
+             <button id="linkColorDropdownBtn" title="Цвет линии" class="dropdown-trigger-btn">
+                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="width: 20px; height: 20px; display: block;">
+                     <circle id="linkColorDropdownCircle" cx="12" cy="12" r="10" stroke="#888" stroke-width="1.5" fill="currentColor" />
+                 </svg>
+             </button>
+             <div class="dropdown-options">
+                 <button onclick="window.stickerApp.changeLinkColor('#cbd5e1')" class="color-dot" style="background-color: #cbd5e1;" data-color="#cbd5e1"></button>
+                 <button onclick="window.stickerApp.changeLinkColor('#a855f7')" class="color-dot" style="background-color: #a855f7;" data-color="#a855f7"></button>
+                 <button onclick="window.stickerApp.changeLinkColor('#ef4444')" class="color-dot" style="background-color: #ef4444;" data-color="#ef4444"></button>
+                 <button onclick="window.stickerApp.changeLinkColor('#3b82f6')" class="color-dot" style="background-color: #3b82f6;" data-color="#3b82f6"></button>
+                 <button onclick="window.stickerApp.changeLinkColor('#10b981')" class="color-dot" style="background-color: #10b981;" data-color="#10b981"></button>
+                 <button onclick="window.stickerApp.changeLinkColor('#f59e0b')" class="color-dot" style="background-color: #f59e0b;" data-color="#f59e0b"></button>
+             </div>
+         </div>
+         
+         <div class="toolbar-separator"></div>
+
+         <button onclick="window.stickerApp.deleteSelectedLink()" title="Удалить стрелочку" data-action="delete">
+             <img src="icons_bord/icon-delete.webp" class="toolbar-icon" alt="Удалить">
+         </button>
     </div>
 
     <div id="floating-selection-toolbar" class="floating-toolbar">
         <button data-action="copy" title="Копировать (Ctrl+C)">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4V2H17V4H20C20.5523 4 21 4.44772 21 5V21C21 21.5523 20.5523 22 20 22H10C9.44772 22 9 21.5523 9 21V5C9 4.44772 9.44772 4 10 4H7ZM11 6V20H19V6H11ZM8 7H4C3.44772 7 3 7.44772 3 8V22C3 22.5523 3.44772 23 4 23H14C14.5523 23 15 22.5523 15 22V21H9V7H8Z"></path></svg>
+            <img src="icons_bord/icon-copy.webp" class="toolbar-icon" alt="Копировать">
         </button>
         <div class="toolbar-separator"></div>
-        <button data-action="delete" title="Удалить">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7 6V3C7 2.44772 7.44772 2 8 2H16C16.5523 2 17 2.44772 17 3V6H22V8H20V21C20 21.5523 19.5523 22 19 22H5C4.44772 22 4 21.5523 4 21V8H2V6H7ZM9 4V6H15V4H9Z"></path></svg>
-        </button>
-    </div>
-    
-    <div id="floating-curve-toolbar" class="floating-toolbar">
-        <button data-action="delete-curve-node" title="Удалить узел" disabled>
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M14 20a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm-2 2a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M4 4h16v2H4V4z"/>
-                <path d="M6 10h12v2H6v-2z"/>
+        <button data-action="select-annotations" title="Выделить нарисованное">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
             </svg>
         </button>
         <div class="toolbar-separator"></div>
+        <button data-action="delete" title="Удалить">
+            <img src="icons_bord/icon-delete.webp" class="toolbar-icon" alt="Удалить">
+        </button>
+    </div>
+
+    <div id="floating-curve-toolbar" class="floating-toolbar">
+        <button data-action="delete-curve-node" title="Удалить узел" disabled>
+            <img src="icons_bord/icon-delete.webp" class="toolbar-icon" alt="Удалить узел">
+        </button>
+        <div class="toolbar-separator"></div>
         <button data-action="copy" title="Копировать (Ctrl+C)">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4V2H17V4H20C20.5523 4 21 4.44772 21 5V21C21 21.5523 20.5523 22 20 22H10C9.44772 22 9 21.5523 9 21V5C9 4.44772 9.44772 4 10 4H7ZM11 6V20H19V6H11ZM8 7H4C3.44772 7 3 7.44772 3 8V22C3 22.5523 3.44772 23 4 23H14C14.5523 23 15 22.5523 15 22V21H9V7H8Z"></path></svg>
+            <img src="icons_bord/icon-copy.webp" class="toolbar-icon" alt="Копировать">
         </button>
         <div class="toolbar-separator"></div>
         <button data-action="delete" title="Удалить кривую">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7 6V3C7 2.44772 7.44772 2 8 2H16C16.5523 2 17 2.44772 17 3V6H22V8H20V21C20 21.5523 19.5523 22 19 22H5C4.44772 22 4 21.5523 4 21V8H2V6H7ZM9 4V6H15V4H9Z"></path></svg>
+            <img src="icons_bord/icon-delete.webp" class="toolbar-icon" alt="Удалить кривую">
         </button>
     </div>
-    
+
     <div id="floating-pdf-toolbar" class="floating-toolbar">
-        <button data-action="prev-page" title="Предыдущая страница">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
-        </button>
-        <div id="pdf-page-indicator" style="font-size: 14px; color: var(--text-primary); white-space: nowrap;">1 / 1</div>
-        <button data-action="next-page" title="Следующая страница">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
-        </button>
+        <div id="pdf-page-nav-group" style="display:flex; align-items:center;">
+            <button data-action="prev-page" title="Предыдущая страница">
+                <img src="icons_bord/icon-previouspage.webp" alt="Предыдущая страница" style="width:20px;height:20px;display:block;object-fit:contain;" />
+            </button>
+            <button id="pdf-page-indicator" title="Перейти на страницу" style="font-size:13px;padding:2px 8px;min-width:40px;cursor:pointer;background:transparent;color:var(--text-primary);white-space:nowrap;margin:0 4px;">1 / 1</button>
+            <button data-action="next-page" title="Следующая страница">
+                <img src="icons_bord/icon-nextpage.webp" alt="Следующая страница" style="width:20px;height:20px;display:block;object-fit:contain;" />
+            </button>
+        </div>
+        <div id="pdf-page-jump-group" style="display:none; align-items:center; gap:6px; padding:0 6px;">
+            <input id="pdf-page-jump-input" type="number" min="1" style="width:44px;padding:4px;border:1px solid var(--border-color,#ddd);border-radius:6px;font-size:13px;background:var(--input-bg,#f5f5f5);color:var(--text-primary);text-align:center;outline:none;" />
+            <span style="font-size: 13px; color: var(--text-secondary); white-space:nowrap;">/ <span id="pdf-page-jump-total">1</span></span>
+            <button id="pdf-page-jump-confirm" title="Перейти" class="pdf-confirm-btn">
+                <img src="icons_bord/icon-endlessons.webp" class="toolbar-icon" alt="Перейти">
+            </button>
+        </div>
         <div class="toolbar-separator"></div>
         <button data-action="copy" title="Копировать (Ctrl+C)">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4V2H17V4H20C20.5523 4 21 4.44772 21 5V21C21 21.5523 20.5523 22 20 22H10C9.44772 22 9 21.5523 9 21V5C9 4.44772 9.44772 4 10 4H7ZM11 6V20H19V6H11ZM8 7H4C3.44772 7 3 7.44772 3 8V22C3 22.5523 3.44772 23 4 23H14C14.5523 23 15 22.5523 15 22V21H9V7H8Z"></path></svg>
+            <img src="icons_bord/icon-copy.webp" class="toolbar-icon" alt="Копировать">
+        </button>
+        <div class="toolbar-separator"></div>
+        <button data-action="select-annotations" title="Выделить нарисованное">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
+            </svg>
         </button>
         <div class="toolbar-separator"></div>
         <button data-action="delete" title="Удалить">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7 6V3C7 2.44772 7.44772 2 8 2H16C16.5523 2 17 2.44772 17 3V6H22V8H20V21C20 21.5523 19.5523 22 19 22H5C4.44772 22 4 21.5523 4 21V8H2V6H7ZM9 4V6H15V4H9Z"></path></svg>
+            <img src="icons_bord/icon-delete.webp" class="toolbar-icon" alt="Удалить">
         </button>
+    </div>
+
+    <!-- Настройки линейки -->
+    <div id="floating-ruler-toolbar" class="floating-toolbar">
+        <!-- Группа 1: Длина и цвет -->
+        <div style="display: flex; align-items: center; gap: 6px;">
+            <select id="ruler-length-select" style="padding: 4px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--input-bg); color: var(--text-primary); font-size: 13px;" title="Длина">
+                <option value="400">10 см</option>
+                <option value="600" selected>15 см</option>
+                <option value="800">20 см</option>
+                <option value="1000">25 см</option>
+                <option value="1200">30 см</option>
+            </select>
+            
+            <div id="floating-ruler-color-picker" class="color-picker-wrapper">
+                <button data-action="pick-ruler-color" title="Цвет линейки">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="10" stroke="#888" stroke-width="1.5" fill="currentColor" />
+                    </svg>
+                </button>
+                <div id="floatingRulerColorPalette" class="floating-palette"></div>
+            </div>
+        </div>
+
+        <div class="toolbar-separator"></div>
+
+        <!-- Группа 2: Магнит угла и шаг магнита -->
+        <div style="display: flex; align-items: center; gap: 2px;">
+            <button id="ruler-snap-toggle-btn" title="Магнит угла">
+                <img src="icons_bord/icon-magnet.webp" class="toolbar-icon" alt="Привязка">
+            </button>
+            <input type="number" id="ruler-snap-angle" value="15" title="Шаг магнита (°)" style="width: 44px; padding: 4px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--input-bg); color: var(--text-primary); font-size: 13px; text-align: center;" />
+        </div>
+
+        <div class="toolbar-separator"></div>
+
+        <!-- Группа 3: Текущий угол -->
+        <div style="display: flex; align-items: center; gap: 4px;">
+            <span style="font-size: 12px; color: var(--text-secondary); white-space: nowrap; user-select: none;">Угол:</span>
+            <input type="number" id="ruler-current-angle" value="0" title="Угол (°)" style="width: 50px; padding: 4px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--input-bg); color: var(--text-primary); font-size: 13px; text-align: center;" />
+        </div>
+
+        <div class="toolbar-separator"></div>
+
+        <!-- Группа 4: Действия (Удалить и Готово) -->
+        <div style="display: flex; align-items: center; gap: 6px;">
+            <button data-action="delete" title="Удалить">
+                <img src="icons_bord/icon-delete.webp" class="toolbar-icon" alt="Удалить">
+            </button>
+            <button id="ruler-apply-btn" title="Готово">
+                <img src="icons_bord/icon-endlessons.webp" class="toolbar-icon" alt="Готово">
+            </button>
+        </div>
     </div>
 
     <div class="toolbar-wrapper" id="toolbarWrapper">
         <button class="toggle-toolbar" id="toggleToolbar" title="Свернуть/развернуть панель">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-            </svg>
+            <img src="icons_bord/icon-hide.webp" class="toolbar-icon" alt="Свернуть">
         </button>
+        <!-- ... (остальной код без изменений) ... -->
         <div class="toolbar-content-slider">
             <div id="drawingSubToolbar" class="sub-toolbar hidden">
                 <button id="expandSubToolbarBtn" title="Настройки линии">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
-                    </svg>
+                    <img src="icons_bord/icon-brushsettings.webp" class="toolbar-icon" alt="Настройки кисти">
                 </button>
                 <div class="sub-toolbar-content desktop-only">
                     <div class="color-palette" id="colorPalette">
@@ -271,19 +740,38 @@
                         <div class="color-dot" style="background-color: #3B82F6;" data-color="#3B82F6"></div>
                         <div class="color-dot" style="background-color: #8B5CF6;" data-color="#8B5CF6"></div>
                     </div>
+                    <div class="dropdown-container" id="desktopFillColorContainer" style="display:none">
+                        <button id="desktopFillColorBtn" title="Цвет заливки">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M19 11l-8-8-8 8a8 8 0 1 0 16 0z"></path>
+                            </svg>
+                        </button>
+                        <div class="sub-toolbar-dropdown color-palette fill-palette" id="fillColorPalette">
+                            <div class="color-dot active transparent-dot" data-fill="transparent" title="Без заливки">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                </svg>
+                            </div>
+                            <div class="color-dot" style="background-color: #000000;" data-fill="#000000"></div>
+                            <div class="color-dot" style="background-color: #FFFFFF;" data-fill="#FFFFFF"></div>
+                            <div class="color-dot" style="background-color: #EF4444;" data-fill="#EF4444"></div>
+                            <div class="color-dot" style="background-color: #F97316;" data-fill="#F97316"></div>
+                            <div class="color-dot" style="background-color: #EAB308;" data-fill="#EAB308"></div>
+                            <div class="color-dot" style="background-color: #22C55E;" data-fill="#22C55E"></div>
+                            <div class="color-dot" style="background-color: #3B82F6;" data-fill="#3B82F6"></div>
+                            <div class="color-dot" style="background-color: #8B5CF6;" data-fill="#8B5CF6"></div>
+                        </div>
+                    </div>
                     <div class="size-editor-wrapper">
                         <div class="line-width-stepper">
                             <button class="stepper-button" data-action="increase-width">+</button>
-                            <input type="number" class="line-width-input" id="desktop-line-width-input" min="1" max="100" value="2" title="Толщина линии">
+                            <input type="number" class="line-width-input" id="desktop-line-width-input" min="1"
+                                max="100" value="2" title="Толщина линии">
                             <button class="stepper-button" data-action="decrease-width">-</button>
                         </div>
                         <div class="dropdown-container line-width-slider-container">
-                            <button class="line-width-slider-btn" title="Точная настройка">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke="currentColor" stroke-linecap="round">
-                                    <path d="M4 7h16" stroke-width="1.5"/>
-                                    <path d="M4 12h16" stroke-width="3"/>
-                                    <path d="M4 17h16" stroke-width="4.5"/>
-                                </svg>
+                            <button class="line-width-slider-btn sub-toolbar-icon-btn" title="Точная настройка">
+                                <img src="icons_bord/icon-tolshina.webp" class="toolbar-icon" alt="Толщина">
                             </button>
                             <div class="sub-toolbar-dropdown line-width-slider-popup">
                                 <input type="range" class="line-width-slider" min="1" max="100" value="2">
@@ -296,51 +784,74 @@
                         </div>
                     </div>
                     <div class="dropdown-container" id="lineStyleContainer">
-                        <button id="lineStyleBtn" title="Стиль линии">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg>
+                        <button id="lineStyleBtn" class="sub-toolbar-icon-btn" title="Стиль линии">
+                            <img src="icons_bord/icon-style.webp" class="toolbar-icon" alt="Стиль">
                         </button>
                         <div class="sub-toolbar-dropdown" id="lineStyleOptionsPopup">
                             <div class="line-style-options" id="lineStyleOptions">
                                 <button data-style="solid" class="active" title="Сплошная линия">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                        stroke-linecap="round">
+                                        <path d="M5 12h14"></path>
+                                    </svg>
                                 </button>
                                 <button data-style="dashed" title="Пунктирная линия">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="4 4"><path d="M5 12h14"></path></svg>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                        stroke-linecap="round" stroke-dasharray="4 4">
+                                        <path d="M5 12h14"></path>
+                                    </svg>
                                 </button>
                                 <button data-style="dash-dot" title="Пунктир-точка">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                        stroke-linecap="round">
                                         <path d="M5 12h14" stroke-dasharray="8 4 1 4"></path>
                                     </svg>
                                 </button>
                                 <button data-style="wavy" title="Волнистая линия">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12c3-3 5-3 8 0s5 3 8 0"></path></svg>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                        stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M3 12c3-3 5-3 8 0s5 3 8 0"></path>
+                                    </svg>
                                 </button>
                             </div>
                         </div>
+                    </div>
+                    <div class="smart-brush-toggle-wrapper" id="desktopSmartBrushWrapper">
+                        <button id="desktopSmartBrushToggle" class="sub-toolbar-icon-btn smart-brush-toggle" title="Умная кисть — автораспознавание фигур (B)">
+                            <img src="icons_bord/icon-smartbrush.webp" class="toolbar-icon" alt="Умная кисть">
+                        </button>
                     </div>
                 </div>
                 <div class="sub-toolbar-content mobile-only" id="mobileDrawingSubToolbar">
                     <div class="dropdown-container" id="mobile-color-container">
                         <button id="mobileColorBtn" title="Цвет">
-                            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#000000" stroke="#888" stroke-width="1.5"/></svg>
+                            <svg viewBox="0 0 24 24">
+                                <circle cx="12" cy="12" r="10" fill="#000000" stroke="#888" stroke-width="1.5" />
+                            </svg>
                         </button>
                         <div class="sub-toolbar-dropdown color-palette" id="mobileColorPalette">
                         </div>
                     </div>
+                    <div class="dropdown-container" id="mobile-fill-color-container" style="display:none;">
+                        <button id="mobileFillColorBtn" title="Цвет заливки">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M19 11l-8-8-8 8a8 8 0 1 0 16 0z"></path>
+                            </svg>
+                        </button>
+                        <div class="sub-toolbar-dropdown color-palette fill-palette" id="mobileFillColorPalette">
+                        </div>
+                    </div>
                     <div class="dropdown-container" id="mobile-width-container">
                         <button id="mobileWidthBtn" title="Толщина линии">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke="currentColor" stroke-linecap="round">
-                                <path d="M4 7h16" stroke-width="1.5"/>
-                                <path d="M4 12h16" stroke-width="3"/>
-                                <path d="M4 17h16" stroke-width="4.5"/>
-                            </svg>
+                            <img src="icons_bord/icon-tolshina.webp" class="toolbar-icon" alt="Толщина">
                             <span id="mobileWidthValue">2</span>
                         </button>
                         <div class="sub-toolbar-dropdown" id="mobileWidthDropdown">
-                             <div class="size-editor-wrapper-mobile">
+                            <div class="size-editor-wrapper-mobile">
                                 <div class="line-width-stepper">
                                     <button class="stepper-button" data-action="increase-width">+</button>
-                                    <input type="number" class="line-width-input" id="mobile-line-width-input" min="1" max="100" value="2">
+                                    <input type="number" class="line-width-input" id="mobile-line-width-input" min="1"
+                                        max="100" value="2">
                                     <button class="stepper-button" data-action="decrease-width">-</button>
                                 </div>
                                 <input type="range" class="line-width-slider" min="1" max="100" value="2">
@@ -353,96 +864,210 @@
                         </div>
                     </div>
                     <div class="dropdown-container" id="mobile-style-container">
-                        <button id="mobileStyleBtn" title="Стиль линии">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg>
+                        <button id="mobileStyleBtn" class="sub-toolbar-icon-btn" title="Стиль линии">
+                            <img src="icons_bord/icon-style.webp" class="toolbar-icon" alt="Стиль">
                         </button>
                         <div class="sub-toolbar-dropdown line-style-options" id="mobileLineStyleOptions">
                         </div>
                     </div>
+                    <button id="mobileSmartBrushToggle" class="sub-toolbar-icon-btn smart-brush-toggle" title="Умная кисть (B)">
+                        <img src="icons_bord/icon-smartbrush.webp" class="toolbar-icon" alt="Умная кисть">
+                    </button>
+                </div>
+                <div class="sub-toolbar-content mobile-only" id="mobileTextSubToolbar" style="display:none;">
+                    <div class="dropdown-container" id="mobile-text-font-container">
+                        <button id="mobileTextFontBtn" title="Шрифт">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M5.5 17h2.25l1.12-3h6.25l1.12 3h2.25L13 3h-2L5.5 17zm4.12-5 2.38-6.38L14.38 12H9.62z"/>
+                            </svg>
+                        </button>
+                        <div class="sub-toolbar-dropdown" id="mobileTextFontOptions">
+                            <div class="dropdown-options font-options" style="position:static;visibility:visible;opacity:1;pointer-events:auto;">
+                                <button data-font="'Roboto', sans-serif" style="font-family: 'Roboto', sans-serif;">Roboto</button>
+                                <button data-font="'Montserrat', sans-serif" style="font-family: 'Montserrat', sans-serif;">Montserrat</button>
+                                <button data-font="'Lora', serif" style="font-family: 'Lora', serif;">Lora (Serif)</button>
+                                <button data-font="'Oswald', sans-serif" style="font-family: 'Oswald', sans-serif;">Oswald</button>
+                                <button data-font="'Caveat', cursive" style="font-family: 'Caveat', cursive;">Caveat</button>
+                                <button data-font="'Fira Code', monospace" style="font-family: 'Fira Code', monospace;">Fira Code</button>
+                                <div class="toolbar-separator" style="margin: 4px; height: 1px; width: 90%; background: var(--glass-border);"></div>
+                                <button data-font="Arial, Helvetica, sans-serif" style="font-family: Arial, sans-serif;">Arial</button>
+                                <button data-font="Georgia, serif" style="font-family: Georgia, serif;">Georgia</button>
+                                <button data-font="'Times New Roman', Times, serif" style="font-family: 'Times New Roman', serif;">Times New Roman</button>
+                                <button data-font="Verdana, sans-serif" style="font-family: Verdana, sans-serif;">Verdana</button>
+                                <button data-font="'Courier New', Courier, monospace" style="font-family: 'Courier New', monospace;">Courier New</button>
+                                <button data-font="Tahoma, Geneva, sans-serif" style="font-family: Tahoma, sans-serif;">Tahoma</button>
+                                <button data-font="'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif" style="font-family: 'Trebuchet MS', sans-serif;">Trebuchet MS</button>
+                                <button data-font="Impact, Charcoal, sans-serif" style="font-family: Impact, sans-serif;">Impact</button>
+                                <button data-font="'Comic Sans MS', cursive, sans-serif" style="font-family: 'Comic Sans MS', cursive;">Comic Sans MS</button>
+                            </div>
+                        </div>
+                    </div>
+                    <input type="number" id="mobileTextFontSizeInput" min="1" max="1000" value="30" title="Размер шрифта">
+                    <div class="dropdown-container" id="mobile-text-style-container">
+                        <button id="mobileTextStyleBtn" title="Стили текста">
+                            <img src="icons_bord/icon-zirniy.webp" class="toolbar-icon" alt="Стили">
+                        </button>
+                        <div class="sub-toolbar-dropdown" id="mobileTextStyleOptions">
+                            <div class="line-style-options">
+                                <button data-action="font-bold" id="mobileTextBold" title="Полужирный">
+                                    <img src="icons_bord/icon-zirniy.webp" class="toolbar-icon" alt="Жирный">
+                                </button>
+                                <button data-action="font-italic" id="mobileTextItalic" title="Курсив">
+                                    <img src="icons_bord/icon-cursive.webp" class="toolbar-icon" alt="Курсив">
+                                </button>
+                                <button data-action="font-underline" id="mobileTextUnderline" title="Подчеркнутый">
+                                    <img src="icons_bord/icon-podcherk.webp" class="toolbar-icon" alt="Подчеркнутый">
+                                </button>
+                                <button data-action="font-strike" id="mobileTextStrike" title="Зачеркнутый">
+                                    <img src="icons_bord/icon-zacherk.webp" class="toolbar-icon" alt="Зачеркнутый">
+                                </button>
+                                <button data-action="text-transform" id="mobileTextTransform" title="Сменить регистр">
+                                    <img src="icons_bord/icon-registr.webp" class="toolbar-icon" alt="Регистр">
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="dropdown-container" id="mobile-text-index-container">
+                        <button id="mobileTextIndexBtn" title="Индексы">
+                            <img src="icons_bord/icon-nadstrochn.webp" class="toolbar-icon" alt="Индексы">
+                        </button>
+                        <div class="sub-toolbar-dropdown" id="mobileTextIndexOptions">
+                            <div class="line-style-options">
+                                <button data-action="font-superscript" id="mobileTextSuperscript" title="Верхний индекс">
+                                    <img src="icons_bord/icon-nadstrochn.webp" class="toolbar-icon" alt="Надстрочный">
+                                </button>
+                                <button data-action="font-subscript" id="mobileTextSubscript" title="Нижний индекс">
+                                    <img src="icons_bord/icon-podstrochn.webp" class="toolbar-icon" alt="Подстрочный">
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="dropdown-container" id="mobile-text-align-container">
+                        <button id="mobileTextAlignBtn" title="Выравнивание">
+                            <img src="icons_bord/icon-leftravn.webp" class="toolbar-icon" alt="Выравнивание">
+                        </button>
+                        <div class="sub-toolbar-dropdown" id="mobileTextAlignOptions">
+                            <div class="line-style-options">
+                                <button data-action="align-left" class="active" title="По левому краю"><img src="icons_bord/icon-leftravn.webp" class="toolbar-icon" alt="По левому краю"></button>
+                                <button data-action="align-center" title="По центру"><img src="icons_bord/icon-center.webp" class="toolbar-icon" alt="По центру"></button>
+                                <button data-action="align-right" title="По правому краю"><img src="icons_bord/icon-rightravn.webp" class="toolbar-icon" alt="По правому краю"></button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="dropdown-container" id="mobile-text-list-container">
+                        <button id="mobileTextListBtn" title="Списки">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M4 6h2v2H4zm0 5h2v2H4zm0 5h2v2H4zm4-10h12v2H8zm0 5h12v2H8zm0 5h12v2H8z"/></svg>
+                        </button>
+                        <div class="sub-toolbar-dropdown" id="mobileTextListOptions">
+                            <div class="line-style-options">
+                                <button data-action="list-bullet" title="Маркированный"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M4 6h2v2H4zm0 5h2v2H4zm0 5h2v2H4zm4-10h12v2H8zm0 5h12v2H8zm0 5h12v2H8z"/></svg></button>
+                                <button data-action="list-number" title="Нумерованный"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M2 17h2v.5H3v1h1v.5H2v1h3v-4H2v1zm1-9h1V4H2v1h1v3zm-1 3h1.8L2 13.1v.9h3v-1H3.2L5 10.9V10H2v1zm5-6v2h14V5H7zm0 14h14v-2H7v2zm0-6h14v-2H7v2z"/></svg></button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="dropdown-container" id="mobile-text-color-container">
+                        <button id="mobileTextColorBtn" title="Цвет текста">
+                            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#000000" stroke="#888" stroke-width="1.5"/></svg>
+                        </button>
+                        <div class="sub-toolbar-dropdown color-palette" id="mobileTextColorPalette">
+                            <div class="color-dot active" style="background-color: #000000;" data-text-color="#000000"></div>
+                            <div class="color-dot" style="background-color: #FFFFFF;" data-text-color="#FFFFFF"></div>
+                            <div class="color-dot" style="background-color: #EF4444;" data-text-color="#EF4444"></div>
+                            <div class="color-dot" style="background-color: #F97316;" data-text-color="#F97316"></div>
+                            <div class="color-dot" style="background-color: #EAB308;" data-text-color="#EAB308"></div>
+                            <div class="color-dot" style="background-color: #22C55E;" data-text-color="#22C55E"></div>
+                            <div class="color-dot" style="background-color: #3B82F6;" data-text-color="#3B82F6"></div>
+                            <div class="color-dot" style="background-color: #8B5CF6;" data-text-color="#8B5CF6"></div>
+                        </div>
+                    </div>
+                    <div class="dropdown-container" id="mobile-text-bg-color-container">
+                        <button id="mobileTextBgColorBtn" title="Цвет маркера (фон текста)">
+                            <img src="icons_bord/icon-marker.webp" class="toolbar-icon" alt="Маркер">
+                        </button>
+                        <div class="sub-toolbar-dropdown color-palette" id="mobileTextBgColorPalette">
+                            <div class="color-dot" style="background: transparent; border: 1px solid var(--border-color); position: relative;" data-text-color="transparent" title="Без фона">
+                                <div style="position: absolute; top: 50%; left: 0; right: 0; height: 1.5px; background: #EF4444; transform: rotate(-45deg);"></div>
+                            </div>
+                            <div class="color-dot active" style="background-color: #000000;" data-text-color="#000000"></div>
+                            <div class="color-dot" style="background-color: #FFFFFF;" data-text-color="#FFFFFF"></div>
+                            <div class="color-dot" style="background-color: #EF4444;" data-text-color="#EF4444"></div>
+                            <div class="color-dot" style="background-color: #F97316;" data-text-color="#F97316"></div>
+                            <div class="color-dot" style="background-color: #EAB308;" data-text-color="#EAB308"></div>
+                            <div class="color-dot" style="background-color: #22C55E;" data-text-color="#22C55E"></div>
+                            <div class="color-dot" style="background-color: #3B82F6;" data-text-color="#3B82F6"></div>
+                            <div class="color-dot" style="background-color: #8B5CF6;" data-text-color="#8B5CF6"></div>
+                        </div>
+                    </div>
+                    <button data-action="copy" class="sub-toolbar-icon-btn" title="Копировать (Ctrl+C)">
+                        <img src="icons_bord/icon-copy.webp" class="toolbar-icon" alt="Копировать">
+                    </button>
                 </div>
             </div>
             <div class="toolbar-container">
                 <div class="toolbar-drag-handle"></div>
                 <div class="toolbar" id="toolbar">
-                    <button id="undoBtn" title="Отменить (Ctrl+Z)"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" /></svg></button>
-                    <button id="redoBtn" title="Повторить (Ctrl+Y)"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m15 15 6-6m0 0-6-6m6 6H9a6 6 0 0 0 0 12h3" /></svg></button>
+                    <button id="undoBtn" title="Отменить (Ctrl+Z)"><img src="icons_bord/icon-back.webp" class="toolbar-icon" alt="Назад"></button>
+                    <button id="redoBtn" title="Повторить (Ctrl+Y)"><img src="icons_bord/icon-next.webp" class="toolbar-icon" alt="Вперед"></button>
                     <div class="toolbar-separator"></div>
-                    <button data-tool="select" title="Выделить (V)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4 4 7.07 17 2.51-7.39L21 11.07z"/></svg></button>
-                    <button data-tool="brush" class="active" title="Кисть (B)"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125" /></svg></button>
-                    <button data-tool="smart-brush" title="Умная кисть (B)">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M15.22 5.22a.75.75 0 011.06 0l2.5 2.5a.75.75 0 010 1.06l-10.5 10.5a.75.75 0 01-1.06 0l-2.5-2.5a.75.75 0 010-1.06l10.5-10.5z" />
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M14.16 6.16L17.84 9.84" />
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M5 3v4M3 5h4" />
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M19 15v4M17 17h4" />
-                        </svg>
-                    </button>
-                    <button data-tool="eraser" title="Ластик (E)" id="eraserBtn"><svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 13.5A4.5 4.5 0 0116.5 18H7.5A4.5 4.5 0 013 13.5V10.5A4.5 4.5 0 017.5 6h9A4.5 4.5 0 0121 10.5v3z" stroke-linecap="round" stroke-linejoin="round"></path><path d="M16.5 18V6" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+                    <button data-tool="select" title="Выделить (V)"><img src="icons_bord/icon-cursor.webp" class="toolbar-icon" alt="Курсор"></button>
+                    <button data-tool="laser" title="Указка (L)"><img src="icons_bord/icon-laser.webp" class="toolbar-icon" alt="Указка"></button>
+                    <button data-tool="brush" class="active" title="Кисть (B)"><img src="icons_bord/icon-brush.webp" class="toolbar-icon" alt="Кисть"></button>
+
+                    <button data-tool="eraser" title="Ластик (E)" id="eraserBtn"><img src="icons_bord/icon-lastick.webp" class="toolbar-icon" alt="Ластик"></button>
                     <div class="tool-container" id="shapes-2d-tool-container">
-                        <button id="shapes2DBtn" data-tool-group="shapes" title="2D Фигуры (S)"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v16.5h16.5V3.75H3.75z" /></svg></button>
+                        <button id="shapes2DBtn" data-tool-group="shapes" title="2D Фигуры (S)"><img src="icons_bord/icon-2D.webp" class="toolbar-icon" alt="2D Фигуры"></button>
                         <div class="tool-options" id="shapes2DOptions">
-                            <a href="#" data-tool="rect"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v16.5h16.5V3.75H3.75z" /></svg><span>Прямоугольник</span></a>
-                            <a href="#" data-tool="ellipse"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg><span>Эллипс</span></a>
-                            <a href="#" data-tool="line"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75 20.25 20.25" /></svg><span>Линия</span></a>
-                            <a href="#" data-tool="curve"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4 20C12 4 12 20 20 4" /></svg><span>Кривая</span></a>
-                            <a href="#" data-tool="parallelogram"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4 20 4-16h12l-4 16H4z" /></svg><span>Параллелограмм</span></a>
-                            <a href="#" data-tool="triangle"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 2 L2 22 H22 Z" /></svg><span>Треугольник</span></a>
-                            <a href="#" data-tool="trapezoid"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 20h18L16 4H8L3 20z" /></svg><span>Трапеция</span></a>
-                             <a href="#" data-tool="rhombus"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 2L22 12 12 22 2 12 12 2Z" /></svg><span>Ромб</span></a>
+                            <a href="#" data-tool="rect"><img src="icons_bord/icon-kvadrat.webp" class="toolbar-icon" alt="Прямоугольник"><span>Прямоугольник</span></a>
+                            <a href="#" data-tool="ellipse"><img src="icons_bord/icon-krug.webp" class="toolbar-icon" alt="Эллипс"><span>Эллипс</span></a>
+                            <a href="#" data-tool="line"><img src="icons_bord/icon-line.webp" class="toolbar-icon" alt="Линия"><span>Линия</span></a>
+                            <a href="#" data-tool="curve"><img src="icons_bord/icon-kurve.webp" class="toolbar-icon" alt="Кривая"><span>Кривая</span></a>
+                            <a href="#" data-tool="parallelogram"><img src="icons_bord/icon-parall.webp" class="toolbar-icon" alt="Параллелограмм"><span>Параллелограмм</span></a>
+                            <a href="#" data-tool="triangle"><img src="icons_bord/icon-triangle.webp" class="toolbar-icon" alt="Треугольник"><span>Треугольник</span></a>
+                            <a href="#" data-tool="trapezoid"><img src="icons_bord/icon-trapec.webp" class="toolbar-icon" alt="Трапеция"><span>Трапеция</span></a>
+                            <a href="#" data-tool="rhombus"><img src="icons_bord/icon-romb.webp" class="toolbar-icon" alt="Ромб"><span>Ромб</span></a>
                         </div>
                     </div>
                     <div class="tool-container" id="shapes-3d-tool-container">
-                        <button id="shapes3DBtn" data-tool-group="shapes" title="3D Фигуры (D)"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" /></svg></button>
+                        <button id="shapes3DBtn" data-tool-group="shapes" title="3D Фигуры (D)"><img src="icons_bord/icon-3D.webp" class="toolbar-icon" alt="3D Фигуры"></button>
                         <div class="tool-options" id="shapes3DOptions">
-                            <a href="#" data-tool="sphere"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" /><path stroke-linecap="round" stroke-linejoin="round" d="M3.5 12a8.5 8.5 0 0 1 17 0" /></svg><span>Сфера</span></a>
-                            <a href="#" data-tool="cone"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 2 L4 21 H20 Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M4 21a8 2 0 0 0 16 0" /></svg><span>Конус</span></a>
-                            <a href="#" data-tool="parallelepiped"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" /></svg><span>Параллелепипед</span></a>
-                            <a href="#" data-tool="pyramid">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 2.25L4.5 21h15L12 2.25z" />
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 2.25v18.75" />
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 21l7.5-6 7.5 6" />
-                                </svg>
-                                <span>Пирамида</span>
-                            </a>
-                            <a href="#" data-tool="frustum"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4 21 L8 4 H16 L20 21 Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M8 4 a4 1.5 0 0 0 8 0" /><path stroke-linecap="round" stroke-linejoin="round" d="M4 21 a8 2 0 0 0 16 0" /></svg><span>Усеченный конус</span></a>
-                            <a href="#" data-tool="truncated-pyramid"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4 20 l3-14 h10 l3 14 H4z M6.5 10 h11" /></svg><span>Усеченная пирамида</span></a>
-                            <a href="#" data-tool="truncated-sphere">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 12.75C20.25 17.1391 16.5391 20.625 12 20.625C7.46094 20.625 3.75 17.1391 3.75 12.75" />
-                                    <ellipse cx="12" cy="12.75" rx="8.25" ry="3.75"/>
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2 2" d="M12 3v9.75" />
-                                </svg>
-                                <span>Усеченная сфера</span>
-                            </a>
+                            <a href="#" data-tool="sphere"><img src="icons_bord/icon-sphere.webp" class="toolbar-icon" alt="Сфера"><span>Сфера</span></a>
+                            <a href="#" data-tool="cone"><img src="icons_bord/icon-conus.webp" class="toolbar-icon" alt="Конус"><span>Конус</span></a>
+                            <a href="#" data-tool="parallelepiped"><img src="icons_bord/icon-3D.webp" class="toolbar-icon" alt="Параллелепипед"><span>Параллелепипед</span></a>
+                            <a href="#" data-tool="pyramid"><img src="icons_bord/icon-piramide.webp" class="toolbar-icon" alt="Пирамида"><span>Пирамида</span></a>
+                            <a href="#" data-tool="frustum"><img src="icons_bord/icon-cutconus.webp" class="toolbar-icon" alt="Усеченный конус"><span>Усеченный конус</span></a>
+                            <a href="#" data-tool="truncated-pyramid"><img src="icons_bord/icon-cuppiramide.webp" class="toolbar-icon" alt="Усеченная пирамида"><span>Усеченная пирамида</span></a>
+                            <a href="#" data-tool="truncated-sphere"><img src="icons_bord/icon-cutsphere.webp" class="toolbar-icon" alt="Усеченная сфера"><span>Усеченная сфера</span></a>
                         </div>
                     </div>
                     <button data-tool="text" title="Текст (T)">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 3h12M12 3v18" />
-                        </svg>
+                        <img src="icons_bord/icon-text.webp" class="toolbar-icon" alt="Текст">
+                    </button>
+                    <button id="addStickerBtn" title="Стикеры (K)">
+                        <img src="icons_bord/icon-sticker.webp" class="toolbar-icon" alt="Стикеры">
                     </button>
                     <div class="tool-container" id="add-file-tool-container">
                         <button id="addFileBtn" data-tool-group="files" title="Добавить файл">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                            </svg>
+                            <img src="icons_bord/icon-skrepka.webp" class="toolbar-icon" alt="Файл">
                         </button>
                         <div class="tool-options" id="addFileOptions">
                             <a href="#" id="addImageMenuBtn">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" /></svg>
+                                <img src="icons_bord/icon-img.webp" class="toolbar-icon" alt="Изображение">
                                 <span>Изображение</span>
                             </a>
                             <a href="#" id="addPdfMenuBtn">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
-                                </svg>
+                                <img src="icons_bord/icon-PDF.webp" class="toolbar-icon" alt="PDF">
                                 <span>PDF-документ</span>
                             </a>
+                            <a href="#" id="addRulerBtn" title="Добавить линейку">
+                                <img src="icons_bord/icon-lineyka.webp" class="toolbar-icon" alt="Линейка">
+                                <span>Линейка</span>
+                            </a>
+                            <a href="#" id="addProtractorBtn" title="Добавить транспортир">
+                                <img src="icons_bord/icon-transportir.webp" class="toolbar-icon" alt="Транспортир">
+                                <span>Транспортир</span>
+                            </a>
                             <a href="#" id="pasteFromClipboardBtn">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                </svg>
+                                <img src="icons_bord/icon-paste.webp" class="toolbar-icon" alt="Вставить">
                                 <span>Вставить (Ctrl+V)</span>
                             </a>
                         </div>
@@ -451,110 +1076,242 @@
             </div>
         </div>
     </div>
-    
-    <div id="settingsModal" class="modal-overlay hidden">
-        <div class="modal-photoshop">
-            <div class="modal-sidebar">
-                <button class="sidebar-button active" data-panel="interface-panel">Интерфейс</button>
-            </div>
-            <div class="modal-main">
-                <div class="modal-panel active" id="interface-panel">
-                    <h3>Интерфейс</h3>
-                    <div class="setting-row">
-                        <label for="theme-select-btn">Цветовая тема:</label>
-                        <div class="ps-dropdown-container" id="theme-dropdown-container">
-                            <button class="ps-select" id="theme-select-btn" data-value="light">Светлая</button>
-                            <div class="ps-dropdown-options">
-                                <button class="ps-dropdown-option active" data-value="light">Светлая</button>
-                                <button class="ps-dropdown-option" data-value="dark">Темная</button>
-                            </div>
-                        </div>
+
+    <div class="modal-overlay hidden" id="settings-modal">
+        <div class="modal-container">
+            <div class="settings-sidebar">
+                <div class="settings-sidebar-title">Настройки</div>
+                <div class="settings-tabs-container">
+                    <div class="settings-tab active" data-panel="settings-tab-appearance">
+                        <img src="icons_bord/icon-style.webp" class="settings-tab-icon" alt="Внешний вид">
+                        Внешний вид
                     </div>
-                    <div class="setting-row">
-                        <label for="background-style-select-btn">Стиль фона:</label>
-                        <div class="ps-dropdown-container" id="background-style-dropdown-container">
-                            <button class="ps-select" id="background-style-select-btn" data-value="dot">В точку</button>
-                            <div class="ps-dropdown-options">
-                                <button class="ps-dropdown-option active" data-value="dot">В точку</button>
-                                <button class="ps-dropdown-option" data-value="grid">В клетку</button>
-                            </div>
-                        </div>
+                    <div class="settings-tab" data-panel="settings-tab-behavior">
+                        <img src="icons_bord/icon-smartbrush.webp" class="settings-tab-icon" alt="Поведение холста">
+                        Поведение холста
                     </div>
-                    <div class="setting-row">
-                        <label for="snapping-select-btn">Примагничивание:</label>
-                        <div class="ps-dropdown-container" id="snapping-dropdown-container">
-                            <button class="ps-select" id="snapping-select-btn" data-value="auto">Автоматически</button>
-                            <div class="ps-dropdown-options">
-                                <button class="ps-dropdown-option" data-value="manual">По Alt</button>
-                                <button class="ps-dropdown-option active" data-value="auto">Автоматически</button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="setting-row">
-                        <label for="smoothing-slider">Сглаживание линий: </label>
-                        <div class="slider-container">
-                            <span>-</span>
-                            <input type="range" id="smoothing-slider" min="0" max="10" value="0">
-                            <span id="smoothing-value">0</span>
-                            <span>+</span>
-                        </div>
-                    </div>
-                    <div class="setting-row">
-                        <label for="transparency-toggle">Отключить прозрачность</label>
-                        <div class="toggle-switch">
-                            <input type="checkbox" id="transparency-toggle">
-                            <label for="transparency-toggle"></label>
-                        </div>
-                    </div>
-                    <div class="setting-row">
-                        <label for="animations-toggle">Отключить анимации</label>
-                        <div class="toggle-switch">
-                            <input type="checkbox" id="animations-toggle">
-                            <label for="animations-toggle"></label>
-                        </div>
+                    <div class="settings-tab" data-panel="settings-tab-performance">
+                        <img src="icons_bord/icon-settings.webp" class="settings-tab-icon" alt="Производительность">
+                        Производительность
                     </div>
                 </div>
             </div>
-            <div class="modal-footer">
-                <button id="cancelSettings" class="ps-button">Отмена</button>
-                <button id="okSettings" class="ps-button primary">OK</button>
+
+            <div class="settings-content-area">
+                <button class="modal-close settings-header-close" id="settings-close-x">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+
+                <div class="settings-panels">
+                    <!-- Внешний вид -->
+                    <div id="settings-tab-appearance" class="settings-panel active">
+                        <h3>Внешний вид</h3>
+                        
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <span class="setting-name">Тема оформления</span>
+                                <span class="setting-desc">Выберите цветовую схему для интерфейса repitorium.ru</span>
+                            </div>
+                            <div class="theme-selector-wrapper" style="width: 170px;">
+                                <div class="theme-selector">
+                                    <div class="theme-card active" id="theme-light">
+                                        <img src="icons_bord/icon-day.webp" alt="Светлая">
+                                        <div class="theme-card-title">Светлая</div>
+                                    </div>
+                                    <div class="theme-card" id="theme-dark">
+                                        <img src="icons_bord/icon-night.webp" alt="Темная">
+                                        <div class="theme-card-title">Темная</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <span class="setting-name">Стиль фона</span>
+                                <span class="setting-desc">Текстура бесконечного холста</span>
+                            </div>
+                            <div class="custom-dropdown" id="dropdown-bg">
+                                <div class="dropdown-header">
+                                    <span class="dropdown-label">В клетку</span>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                </div>
+                                <div class="dropdown-list">
+                                    <div class="dropdown-item active" data-value="grid">В клетку</div>
+                                    <div class="dropdown-item" data-value="dot">В точку</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Поведение холста -->
+                    <div id="settings-tab-behavior" class="settings-panel">
+                        <h3>Поведение холста</h3>
+
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <span class="setting-name">Магнитная привязка</span>
+                                <span class="setting-desc">Прилипание к другим фигурам и сетке</span>
+                            </div>
+                            <div class="custom-dropdown" id="dropdown-snap">
+                                <div class="dropdown-header">
+                                    <span class="dropdown-label">Автоматически</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                </div>
+                                <div class="dropdown-list">
+                                    <div class="dropdown-item active" data-value="auto">Автоматически</div>
+                                    <div class="dropdown-item" data-value="manual">Удержание Alt</div>
+                                    <div class="dropdown-item" data-value="off">Отключено</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <span class="setting-name">Прилипание к линейке</span>
+                                <span class="setting-desc">Кисть примагничивается к краю линейки</span>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="snap-to-ruler-toggle" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <span class="setting-name">Пропорции при изменении</span>
+                                <span class="setting-desc">Сохранять пропорции для PDF и изображений</span>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="proportional-scale-toggle" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <span class="setting-name">Сглаживание линий</span>
+                                <span class="setting-desc">Выравнивание штрихов при быстром рисовании</span>
+                            </div>
+                            <div class="slider-container" style="max-width: 170px;">
+                                <input type="range" id="smoothing-slider" min="0" max="10" value="0">
+                                <span id="smoothing-value" style="color: var(--text-muted); font-weight: 500;">0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Производительность -->
+                    <div id="settings-tab-performance" class="settings-panel">
+                        <h3>Производительность</h3>
+
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <span class="setting-name">Отключить прозрачность</span>
+                                <span class="setting-desc">Сплошной фон меню. Повышает FPS на слабых устройствах.</span>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="transparency-toggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <span class="setting-name">Отключить анимации</span>
+                                <span class="setting-desc">Мгновенное открытие меню и окон.</span>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="animations-toggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-footer">
+                    <button class="btn btn-secondary" id="cancelSettings">Отмена</button>
+                    <button class="btn btn-primary" id="okSettings">Сохранить изменения</button>
+                </div>
             </div>
         </div>
     </div>
     
-    <div id="helpModal" class="modal-overlay hidden">
-        <div class="modal-photoshop" style="width: 650px; height: 450px;">
-            <div class="modal-sidebar">
-                <button class="sidebar-button active" data-panel="general-panel">Введение</button>
-                <button class="sidebar-button" data-panel="hotkeys-panel">Горячие клавиши</button>
-                <button class="sidebar-button" data-panel="navigation-panel">Навигация</button>
-                <button class="sidebar-button" data-panel="objects-panel">Работа с объектами</button>
-                <button class="sidebar-button" data-panel="tools-panel">Инструменты</button>
-                <button class="sidebar-button" data-panel="advanced-panel">Продвинутые техники</button>
+    <!-- ОКНО СПРАВКИ -->
+    <div class="modal-overlay hidden" id="help-modal">
+        <div class="modal-container">
+            <div class="help-sidebar">
+                <div class="help-sidebar-title">Справочник</div>
+                <div class="help-search-container">
+                    <input type="text" id="help-search" placeholder="Поиск в справке..." autocomplete="off">
+                    <span class="help-search-clear hidden" id="help-search-clear">&times;</span>
+                </div>
+                <div class="help-tabs-container">
+                    <div class="help-tab active" data-panel="tab-intro">
+                        <img src="icons_bord/icon-profile.webp" class="help-tab-icon" alt="Введение">
+                        Введение
+                    </div>
+                    <div class="help-tab" data-panel="tab-hotkeys">
+                        <img src="icons_bord/icon-text.webp" class="help-tab-icon" alt="Горячие клавиши">
+                        Горячие клавиши
+                    </div>
+                    <div class="help-tab" data-panel="tab-nav">
+                        <img src="icons_bord/icon-hand.webp" class="help-tab-icon" alt="Навигация">
+                        Навигация
+                    </div>
+                    <div class="help-tab" data-panel="tab-tools">
+                        <img src="icons_bord/icon-brush.webp" class="help-tab-icon" alt="Инструменты">
+                        Инструменты
+                    </div>
+                    <div class="help-tab" data-panel="tab-shapes">
+                        <img src="icons_bord/icon-3D.webp" class="help-tab-icon" alt="Фигуры и 3D">
+                        2D и 3D Фигуры
+                    </div>
+                    <div class="help-tab" data-panel="tab-objects">
+                        <img src="icons_bord/icon-cursor.webp" class="help-tab-icon" alt="Объекты">
+                        Работа с объектами
+                    </div>
+                    <div class="help-tab" data-panel="tab-advanced">
+                        <img src="icons_bord/icon-settings.webp" class="help-tab-icon" alt="Дополнительно">
+                        Дополнительно
+                    </div>
+                </div>
             </div>
-            <div class="modal-main">
-                <div class="modal-panel active" id="general-panel"></div>
-                <div class="modal-panel" id="hotkeys-panel"></div>
-                <div class="modal-panel" id="navigation-panel"></div>
-                <div class="modal-panel" id="objects-panel"></div>
-                <div class="modal-panel" id="tools-panel"></div>
-                <div class="modal-panel" id="advanced-panel"></div>
-            </div>
-            <div class="modal-footer">
-                <button id="closeHelpBtn" class="ps-button primary">OK</button>
+
+            <div class="help-content-area">
+                <div class="help-content-header">
+                    <div class="help-device-selector" id="helpDeviceSelector">
+                        <button class="device-btn active" data-device="desktop">
+                            <img src="icons_bord/icon-cursor.webp" alt="ПК">
+                            <span>Компьютер (Мышь)</span>
+                        </button>
+                        <button class="device-btn" data-device="touch">
+                            <img src="icons_bord/icon-hand.webp" alt="Сенсор">
+                            <span>Сенсор / Планшет</span>
+                        </button>
+                    </div>
+                </div>
+
+                <button class="modal-close help-header-close" id="closeHelpBtnTop">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+
+                <div class="help-panels" id="helpPanelsContainer">
+                    <div id="tab-no-results" class="help-panel" style="text-align: center; padding: 40px 20px; display: none;">
+                        <img src="icons_bord/icon-search.webp" style="width: 64px; height: 64px; margin-bottom: 20px; opacity: 0.6; display: block; margin-left: auto; margin-right: auto;">
+                        <h4 style="border-bottom: none; padding: 0; margin-bottom: 10px;">Ничего не найдено</h4>
+                        <p>Попробуйте ввести другие ключевые слова или сократить запрос.</p>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
-    <div id="confirmClearModal" class="modal-overlay hidden">
-        <div class="modal-photoshop" style="width: 400px; height: auto;">
-            <div class="modal-main" style="grid-column: 1 / -1; text-align: center;">
-                <h3>Подтверждение</h3>
-                <p>Вы уверены, что хотите полностью очистить доску? Это действие нельзя будет отменить.</p>
-            </div>
-            <div class="modal-footer" style="grid-column: 1 / -1;">
-                <button id="cancelClearBtn" class="ps-button">Отмена</button>
-                <button id="confirmClearBtn" class="ps-button primary">Очистить</button>
+    <div class="modal-overlay hidden" id="confirmClearModal">
+        <div class="modal-container" style="width: 100%; max-width: 400px; text-align: center; padding: 32px 24px;">
+            <div class="modal-title" style="justify-content: center; margin-bottom: 16px; font-size: 1.5rem;">Подтверждение</div>
+            <p style="color: var(--text-muted); margin-bottom: 24px; font-size: 1.05rem; line-height: 1.5;">Вы уверены, что хотите полностью очистить доску? Это действие нельзя будет отменить.</p>
+            <div style="display: flex; justify-content: center; gap: 12px;">
+                <button id="cancelClearBtn" class="btn btn-secondary">Отмена</button>
+                <button id="confirmClearBtn" class="btn btn-primary" style="background-color: var(--danger-color); border-color: var(--danger-color);">Очистить</button>
             </div>
         </div>
     </div>
@@ -571,20 +1328,16 @@
 
     <div id="custom-tooltip"></div>
     <div id="mobile-creation-tooltip" class="mobile-tooltip"></div>
-    
-    <!-- --- НАЧАЛО ИЗМЕНЕНИЙ: Добавляем элемент счетчика --- -->
+
     <div id="object-counter" class="hidden"></div>
-    <!-- --- КОНЕЦ ИЗМЕНЕНИЙ --- -->
 
-    <script type="module" src="js/main.js"></script>
+    <script type="module" src='js/main.js?v=1.1.8'></script>
 
-<!-- Hidden paste catcher for mobile/Android -->
-<div id="pasteCatcher"
-     contenteditable="true"
-     tabindex="-1"
-     aria-hidden="true"
-     style="position:fixed;left:-9999px;top:auto;width:1px;height:1px;opacity:0;pointer-events:none;">
-</div>
+    <!-- Hidden paste catcher for mobile/Android -->
+    <div id="pasteCatcher" contenteditable="true" tabindex="-1" aria-hidden="true"
+        style="position:fixed;left:-9999px;top:auto;width:1px;height:1px;opacity:0;pointer-events:none;">
+    </div>
 
 </body>
+
 </html>

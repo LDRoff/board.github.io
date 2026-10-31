@@ -1,28 +1,28 @@
 // js/canvas.js
 
-import { createInitialState } from './state.js';
-import * as ui from './ui.js';
-import * as touch from './touchHandlers.js';
-import * as pointer from './pointerHandlers.js';
-import { performZoom } from './zoom.js';
-import * as textTool from './text.js';
-import * as utils from './utils.js';
-import * as hitTest from './hitTest.js';
+import { createInitialState } from './state.js?v=1.1.8';
+import * as ui from './ui.js?v=1.1.8';
+import * as touch from './touchHandlers.js?v=1.1.8';
+import * as pointer from './pointerHandlers.js?v=1.1.8';
+import { performZoom, zoomToFit } from './zoom.js?v=1.1.8';
+import * as textTool from './text.js?v=1.1.8';
+import * as utils from './utils.js?v=1.1.8';
+import * as hitTest from './hitTest.js?v=1.1.8';
 
 export function initializeCanvas(
-  canvas,
-  interactionCanvas,
-  ctx,
-  redraw,
-  commitChange,
-  updateSubToolbarVisibility,
-  debouncedSaveViewState,
-  drawBackground
+    canvas,
+    interactionCanvas,
+    ctx,
+    redraw,
+    commitChange,
+    updateSubToolbarVisibility,
+    debouncedSaveViewState,
+    drawBackground
 ) {
     const iCtx = interactionCanvas.getContext('2d');
     const cacheCanvas = document.getElementById('cacheCanvas');
     const cacheCtx = cacheCanvas.getContext('2d');
-    
+
     const callbacks = {
         redrawCallback: redraw,
         saveState: commitChange,
@@ -45,27 +45,50 @@ export function initializeCanvas(
     state.showCreationTooltip = ui.showCreationTooltip;
     state.hideCreationTooltip = ui.hideCreationTooltip;
     state.updateTextEditorStyle = textTool.updateEditorStyle;
-    state.updateTextEditorTransform = textTool.updateTextEditorTransform;
+    state.syncTextEditorWithCanvas = textTool.syncEditorWithCanvas;
     state.performZoom = performZoom.bind(null, state, callbacks);
+    state.zoomToFit = zoomToFit.bind(null, state, callbacks);
 
     const hideContextMenu = ui.setupContextMenu(state, callbacks);
-    
+
     state.onPointerMove = pointer.draw.bind(null, state, callbacks);
     state.onPointerUp = pointer.stopDrawing.bind(null, state, callbacks);
-    
+
     const onPointerDown = pointer.startDrawing.bind(null, state, callbacks, hideContextMenu);
-    const onTouchStart = touch.handleTouchStart.bind(null, state);
+    const onTouchStart = touch.handleTouchStart.bind(null, state, callbacks);
     const onTouchMove = touch.handleTouchMove.bind(null, state, callbacks);
     const onTouchEnd = touch.handleTouchEnd.bind(null, state);
 
     canvas.addEventListener('pointerdown', onPointerDown);
     canvas.addEventListener('pointermove', state.onPointerMove);
     
+    let clickStartX = 0, clickStartY = 0;
+    canvas.addEventListener('pointerdown', (e) => {
+        clickStartX = e.clientX;
+        clickStartY = e.clientY;
+    });
+    canvas.addEventListener('click', (e) => {
+        const dist = Math.hypot(e.clientX - clickStartX, e.clientY - clickStartY);
+        if (dist > 5) {
+            e.stopPropagation();
+        }
+    });
+
     canvas.addEventListener('touchstart', onTouchStart, { passive: false });
     canvas.addEventListener('touchmove', onTouchMove, { passive: false });
     canvas.addEventListener('touchend', onTouchEnd);
 
     const handlePointerEndOutside = (e) => {
+        if (e && e.pointerId !== undefined) {
+            state.activePointers.delete(e.pointerId);
+        } else {
+            state.activePointers.clear();
+        }
+
+        if (state.activeTool === 'laser') {
+            state.laserPointerPos = null;
+        }
+
         if (state.hoverCheckTimer) {
             clearTimeout(state.hoverCheckTimer);
             state.hoverCheckTimer = null;
@@ -74,14 +97,15 @@ export function initializeCanvas(
             if (state.isDrawing && state.didErase) {
                 const layersToErase = Array.from(state.layersToErase);
                 const ids = new Set(layersToErase.map(l => l.id));
-                
+
+                state.layers = state.layers.filter(l => !ids.has(l.id));
+
                 commitChange({
                     type: 'deletion',
                     before: layersToErase,
                     after: [],
                 });
 
-                state.layers = state.layers.filter(l => !ids.has(l.id));
                 redraw();
             }
             state.isDrawing = false;
@@ -97,16 +121,23 @@ export function initializeCanvas(
             state.isSpenEraserActive = false;
             state.toolBeforeSpenEraser = null;
             state.canvas.classList.remove('cursor-eraser');
+            // Восстанавливаем курсор инструмента через централизованную функцию
+            ui.updateCursor(state, null);
             updateSubToolbarVisibility();
         }
 
-        if (state.isPanning) { 
-            state.isPanning = false; 
+        if (state.isPanning) {
+            state.isPanning = false;
             document.removeEventListener('pointermove', state.onPointerMove);
             document.removeEventListener('pointerup', state.onPointerUp);
         }
-        
-        if (state.isDrawing || state.isInteracting) {
+
+        // На мобильных устройствах pointerleave срабатывает при отрыве пальца от экрана.
+        // Нельзя вызывать stopDrawing, если мы находимся в середине многошагового рисования
+        // (например, трапеция, пирамида), иначе все оставшиеся шаги будут пройдены мгновенно
+        // с теми же координатами, и фигура завершится сразу после первого этапа.
+        const isMultiStepInProgress = state.currentAction.startsWith('drawing') && !state.isDrawing && !state.isInteracting;
+        if (!isMultiStepInProgress && (state.isDrawing || state.isInteracting || state.currentAction !== 'none')) {
             const fakeEvent = new PointerEvent('pointerup', e);
             pointer.stopDrawing(state, callbacks, fakeEvent);
         }
@@ -114,22 +145,57 @@ export function initializeCanvas(
 
     canvas.addEventListener('pointerleave', handlePointerEndOutside);
     canvas.addEventListener('pointercancel', handlePointerEndOutside);
-    
+
     canvas.addEventListener('wheel', (e) => {
-        e.preventDefault(); 
+        if (state.isPanning) return;
+        e.preventDefault();
         const rect = canvas.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
-        
+
         if (e.deltaY < 0) {
             state.performZoom('in', { x: mouseX, y: mouseY });
         } else {
             state.performZoom('out', { x: mouseX, y: mouseY });
         }
     });
-    
+
+    const stickersLayer = document.getElementById('stickers-layer');
+    if (stickersLayer) {
+        stickersLayer.addEventListener('wheel', (e) => {
+            if (state.isPanning) return;
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            if (e.deltaY < 0) {
+                state.performZoom('in', { x: mouseX, y: mouseY });
+            } else {
+                state.performZoom('out', { x: mouseX, y: mouseY });
+            }
+        }, { passive: false });
+
+        stickersLayer.addEventListener('pointerdown', (e) => {
+            if (e.pointerType === 'mouse' && e.button === 1) {
+                onPointerDown(e);
+            }
+        });
+
+        stickersLayer.addEventListener('touchstart', onTouchStart, { passive: false });
+        stickersLayer.addEventListener('touchmove', onTouchMove, { passive: false });
+        stickersLayer.addEventListener('touchend', onTouchEnd);
+    }
+
     canvas.addEventListener('contextmenu', (e) => {
         e.preventDefault();
+
+        // Предотвращаем появление контекстного меню ТОЛЬКО если пользователь сейчас рисует (кисть, ластик, фигуры).
+        // Если выбран инструмент "Выбор" (стрелочка), state.isDrawing будет false, и меню откроется.
+        if (state.isDrawing) {
+            return;
+        }
+
         const pos = utils.getMousePos(e, state);
         const clickedLayer = hitTest.getLayerAtPosition(pos, state.layers, state.zoom, state.spatialGrid);
 
@@ -140,7 +206,7 @@ export function initializeCanvas(
                 updateSubToolbarVisibility();
                 state.updateFloatingToolbar();
             }
-            
+
             const contextMenu = document.getElementById('contextMenu');
             contextMenu.style.left = '0px';
             contextMenu.style.top = '0px';
@@ -167,7 +233,7 @@ export function initializeCanvas(
             hideContextMenu();
         }
     });
-    
+
 
     return state;
 }

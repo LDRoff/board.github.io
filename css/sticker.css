@@ -1,0 +1,359 @@
+/* --- CSS Styles for Stickers Tool --- */
+
+.stickers-layer-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 1px;
+    overflow: visible;
+    pointer-events: none;
+    z-index: 25;
+}
+
+/* Sticker Card Container */
+.sticker-card {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+    transform-origin: center center;
+    will-change: transform, left, top, width, height;
+    user-select: none;
+    pointer-events: auto;
+    filter: drop-shadow(0 4px 6px rgba(0,0,0,0.08));
+    transition: filter 0.2s, box-shadow 0.2s; 
+    cursor: var(--cursor-select, default);
+    box-sizing: border-box;
+}
+
+.sticker-card:active {
+    cursor: var(--cursor-grabbing, grabbing);
+}
+
+/* Background Layer */
+.sticker-bg {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(0,0,0,0.08);
+    border-radius: 16px;
+    z-index: -1;
+    transition: clip-path 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), border-radius 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.2s, border-color 0.2s;
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+    box-sizing: border-box;
+}
+
+.sticker-card.selected .sticker-bg {
+    border-color: #3b82f6;
+    box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.2), 0 0 8px rgba(59, 130, 246, 0.3);
+}
+
+.sticker-card[data-shape="rhombus"].selected {
+    filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.6)) drop-shadow(0 4px 6px rgba(0,0,0,0.08)) !important;
+}
+
+.sticker-card[data-shape="rhombus"].selected .sticker-bg {
+    border: 2.5px solid #3b82f6 !important;
+}
+
+.sticker-card.dragging {
+    z-index: 500 !important;
+    filter: drop-shadow(0 20px 25px rgba(0,0,0,0.15));
+    cursor: var(--cursor-grabbing, grabbing);
+}
+
+/* Shapes support */
+.sticker-card[data-shape="circle"] .sticker-bg { 
+    border-radius: 50%; 
+}
+.sticker-card[data-shape="rhombus"] .sticker-bg { 
+    border-radius: 12px;
+    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); 
+}
+
+/* Drawing Canvas Layer */
+.sticker-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 4;
+    pointer-events: none;
+    border-radius: 16px;
+    transition: clip-path 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), border-radius 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.sticker-card[data-shape="circle"] .sticker-canvas { 
+    border-radius: 50%; 
+}
+.sticker-card[data-shape="rhombus"] .sticker-canvas { 
+    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); 
+}
+
+/* Drawing Mode Active */
+.sticker-card.drawing-mode { 
+    cursor: crosshair !important; 
+}
+.sticker-card.drawing-mode .sticker-canvas { 
+    pointer-events: auto; 
+    z-index: 5; 
+}
+.sticker-card.drawing-mode .sticker-content { 
+    pointer-events: none; 
+    opacity: 0.6; 
+}
+
+/* Editable Text Content */
+.sticker-content {
+    position: relative;
+    z-index: 3;
+    flex-grow: 1;
+    padding: 1.25rem;
+    overflow: hidden;
+    word-wrap: break-word;
+    font-size: 15px;
+    line-height: 1.5;
+    color: #334155;
+    border-radius: 16px;
+    cursor: inherit;
+    user-select: none;
+    box-sizing: border-box;
+}
+
+.sticker-content:focus {
+    outline: none;
+}
+
+.sticker-content[contenteditable="true"] {
+    cursor: text;
+    user-select: text;
+    overflow: auto;
+}
+
+/* Placeholder support */
+.sticker-content:empty::before {
+    content: "Напишите или нарисуйте...";
+    color: #94a3b8;
+    pointer-events: none;
+    display: block;
+}
+
+.sticker-card.has-drawing .sticker-content:empty::before,
+.sticker-card.has-image .sticker-content:empty::before {
+    display: none;
+}
+
+.sticker-card[data-shape="circle"] .sticker-content {
+    padding: 15%;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sticker-card[data-shape="rhombus"] .sticker-content {
+    padding: 25%;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Image overlay */
+.sticker-image {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+    display: none;
+    border-radius: 16px;
+    transition: clip-path 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), border-radius 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.sticker-card[data-shape="circle"] .sticker-image { 
+    border-radius: 50%; 
+}
+.sticker-card[data-shape="rhombus"] .sticker-image { 
+    border-radius: 12px;
+    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); 
+}
+
+/* Resize Handle */
+.resize-handle {
+    position: absolute;
+    bottom: -6px;
+    right: -6px;
+    width: 24px;
+    height: 24px;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    cursor: nwse-resize;
+    opacity: 0;
+    transition: opacity 0.2s, transform 0.2s, color 0.2s, border-color 0.2s;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #64748b;
+}
+
+.sticker-card:hover .resize-handle,
+.sticker-card.selected .resize-handle { 
+    opacity: 1; 
+}
+.resize-handle:hover { 
+    transform: scale(1.1); 
+    color: #3b82f6; 
+    border-color: #3b82f6; 
+}
+
+/* Ports for connections */
+.port {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    background-color: #fff;
+    border: 3px solid #cbd5e1;
+    border-radius: 50%;
+    cursor: crosshair;
+    opacity: 0;
+    transition: opacity 0.2s, transform 0.2s, border-color 0.2s;
+    z-index: 10;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    box-sizing: border-box;
+}
+
+.sticker-card:hover .port, 
+.sticker-card.selected .port, 
+.port.active { 
+    opacity: 1; 
+}
+.port:hover, 
+.port.active { 
+    border-color: #3b82f6; 
+    transform: scale(1.3); 
+}
+
+.port[data-side="top"] { top: -7px; left: 50%; margin-left: -7px; }
+.port[data-side="bottom"] { bottom: -7px; left: 50%; margin-left: -7px; }
+.port[data-side="left"] { left: -7px; top: 50%; margin-top: -7px; }
+.port[data-side="right"] { right: -7px; top: 50%; margin-top: -7px; }
+
+/* SVG connections layers */
+svg.connections {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 1px;
+    overflow: visible;
+    pointer-events: none; 
+    z-index: 0;
+}
+
+path.link {
+    fill: none;
+    stroke: #cbd5e1;
+    stroke-width: 3;
+    stroke-linecap: round;
+    transition: stroke 0.3s;
+    pointer-events: stroke;
+    cursor: pointer;
+}
+
+path.link-hitbox {
+    fill: none;
+    stroke: transparent;
+    stroke-width: 20;
+    pointer-events: stroke;
+    cursor: pointer;
+}
+
+path.link.selected { 
+    stroke-dasharray: 4 4; 
+}
+path.link-active {
+    stroke: #3b82f6;
+    stroke-dasharray: 6 6;
+    animation: dash 1s linear infinite;
+    pointer-events: none !important;
+}
+
+path.link-insert-glow {
+    fill: none !important;
+    stroke: #3b82f6 !important;
+    stroke-width: 6 !important;
+    stroke-dasharray: 8 6 !important;
+    opacity: 1;
+    animation: dash 1s linear infinite !important;
+    pointer-events: none !important;
+}
+
+@keyframes dash { 
+    to { stroke-dashoffset: -12; } 
+}
+
+/* Pan Mode Event Passthrough & Cursors */
+.stickers-layer-container.pan-mode .sticker-card,
+.stickers-layer-container.pan-mode svg.connections path {
+    pointer-events: none !important;
+    cursor: inherit;
+}
+
+/* Ensure label inside floating sticker toolbar behaves like a button */
+.floating-toolbar label {
+    background: transparent;
+    border: none;
+    padding: 6px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+.floating-toolbar label:hover {
+    background-color: rgba(59, 130, 246, 0.12);
+    transform: scale(1.08);
+}
+
+.floating-toolbar label:active {
+    transform: scale(0.96);
+    box-shadow: var(--glass-inner-shadow);
+    background-color: rgba(59, 130, 246, 0.18);
+}
+
+.floating-toolbar label:hover .toolbar-icon {
+    transform: scale(1.18);
+    filter: drop-shadow(0 1px 4px rgba(0,0,0,0.18));
+}
+
+/* Custom Scrollbars */
+.sticker-content::-webkit-scrollbar { 
+    width: 4px; 
+}
+.sticker-content::-webkit-scrollbar-thumb { 
+    background: rgba(0,0,0,0.12); 
+    border-radius: 2px; 
+}
+
+/* Hidden inputs */
+.sticker-hidden-input {
+    display: none;
+}
+
+/* Annotation Editing Mode Active */
+.sticker-card.editing-annotations .sticker-bg {
+    outline: 2.5px dashed #ef4444 !important;
+    outline-offset: -2.5px;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+}
