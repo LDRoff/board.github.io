@@ -38,7 +38,7 @@ function openDB() {
  * @param {object} state - Полный объект состояния для сохранения.
  */
 async function saveFullStateToDB(state) {
-    if (!state) return;
+    if (!state) return false;
     try {
         // Очистка данных от несериализуемых полей
         const cleanLayers = state.layers.map(layer => {
@@ -59,13 +59,17 @@ async function saveFullStateToDB(state) {
         const store = transaction.objectStore(STORE_NAME);
         store.put(stateToSave, KEY);
 
-        return new Promise((resolve, reject) => {
-            transaction.oncomplete = () => resolve();
-            transaction.onerror = () => reject(transaction.error);
+        return await new Promise((resolve) => {
+            transaction.oncomplete = () => resolve(true);
+            transaction.onerror = () => {
+                console.error('Ошибка записи в IndexedDB (Worker):', transaction.error);
+                resolve(false);
+            };
         });
 
     } catch (error) {
         console.error('Ошибка сохранения полного состояния в Worker:', error);
+        return false;
     }
 }
 
@@ -81,12 +85,14 @@ self.onmessage = async (event) => {
         // --- НАЧАЛО ИЗМЕНЕНИЙ: Инициализация состояния в воркере ---
         workerState = payload;
         // При инициализации сразу сохраняем полное состояние
-        await saveFullStateToDB(workerState);
+        const ok = await saveFullStateToDB(workerState);
+        self.postMessage({ type: 'saved', status: ok ? 'success' : 'error', msgType: type });
         // --- КОНЕЦ ИЗМЕНЕНИЙ ---
     } else if (type === 'update') {
         // --- НАЧАЛО ИЗМЕНЕНИЙ: Применение инкрементальных обновлений ---
         if (!workerState) {
             console.error('Worker не инициализирован, но получил команду на обновление.');
+            self.postMessage({ type: 'saved', status: 'error', msgType: type });
             return;
         }
 
@@ -116,7 +122,8 @@ self.onmessage = async (event) => {
         }
 
         // После применения патча сохраняем полное актуальное состояние
-        await saveFullStateToDB(workerState);
+        const ok = await saveFullStateToDB(workerState);
+        self.postMessage({ type: 'saved', status: ok ? 'success' : 'error', msgType: type });
         // --- КОНЕЦ ИЗМЕНЕНИЙ ---
     }
 };

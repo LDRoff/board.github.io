@@ -1,17 +1,17 @@
-// js/actions.js
+// --- START OF FILE js/actions.js ---
 
-import { getBoundingBox, getGroupBoundingBox, rotatePoint, getTransformedBoundingBox } from './geometry.js';
-import * as hitTest from './hitTest.js';
-import { snapToGrid, getLayersInProximity } from './utils.js';
+import { getBoundingBox, getGroupBoundingBox, rotatePoint } from './geometry.js?v=1.2.3';
+import * as hitTest from './hitTest.js?v=1.2.3';
+import { snapToGrid, getLayersInProximity, createTextImage } from './utils.js?v=1.2.3';
 
 export function handleMove(state, pos, event) {
     let dx = pos.x - state.dragStartPos.x;
     let dy = pos.y - state.dragStartPos.y;
-    
+
     const shouldSnap = (state.snappingMode === 'manual' && event.altKey) || (state.snappingMode === 'auto' && !event.altKey);
-    
+
     if (shouldSnap) {
-        state.snapPoint = null; 
+        state.snapPoint = null;
         const SNAP_THRESHOLD = 10 / state.zoom;
         let bestSnapDX = null;
         let bestSnapDY = null;
@@ -32,36 +32,14 @@ export function handleMove(state, pos, event) {
             currentUnsnappedBox.x += dx;
             currentUnsnappedBox.y += dy;
             const movingPoints = getPointsForBox(currentUnsnappedBox);
-            
-            // --- НАЧАЛО ИЗМЕНЕНИЙ: Оптимизация поиска точек привязки ---
-            
-            // 1. Находим только близлежащие слои с помощью пространственной сетки
-            const nearbyLayers = new Set();
-            const selectedIds = new Set(state.selectedLayers.map(l => l.id));
 
-            // Для каждой точки движущегося объекта находим соседей
-            movingPoints.forEach(point => {
-                const proximal = getLayersInProximity(state.spatialGrid, point);
-                proximal.forEach(layer => {
-                    // Добавляем только если это не один из выделенных слоев
-                    if (!selectedIds.has(layer.id)) {
-                        nearbyLayers.add(layer);
-                    }
-                });
-            });
-            const proximalStaticLayers = Array.from(nearbyLayers);
-
-            // 2. Генерируем точки привязки ТОЛЬКО из близлежащих слоев
+            const staticLayers = state.layers.filter(l => !state.selectedLayers.some(sl => sl.id === l.id));
             let staticPoints = [];
-            proximalStaticLayers.forEach(layer => {
-                const box = getBoundingBox(layer); // Теперь эта дорогая функция вызывается всего несколько раз
+            staticLayers.forEach(layer => {
+                const box = getBoundingBox(layer);
                 if (box) staticPoints.push(...getPointsForBox(box));
             });
-            
-            // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
-
-            // 1. Примагничивание к объектам
             for (const movingPoint of movingPoints) {
                 for (const staticPoint of staticPoints) {
                     const snapDX = staticPoint.x - movingPoint.x;
@@ -79,10 +57,9 @@ export function handleMove(state, pos, event) {
                     }
                 }
             }
-            
-            // 2. Примагничивание к сетке
+
             const gridPoints = movingPoints;
-            for(const gridPoint of gridPoints) {
+            for (const gridPoint of gridPoints) {
                 const snappedX = snapToGrid(gridPoint.x);
                 const diffX = snappedX - gridPoint.x;
                 if (Math.abs(diffX) < SNAP_THRESHOLD) {
@@ -92,96 +69,105 @@ export function handleMove(state, pos, event) {
                 }
                 const snappedY = snapToGrid(gridPoint.y);
                 const diffY = snappedY - gridPoint.y;
-                 if (Math.abs(diffY) < SNAP_THRESHOLD) {
+                if (Math.abs(diffY) < SNAP_THRESHOLD) {
                     if (bestSnapDY === null || Math.abs(diffY) < Math.abs(bestSnapDY)) {
                         bestSnapDY = diffY;
                     }
                 }
             }
-            
+
             if (bestSnapDX !== null) dx += bestSnapDX;
             if (bestSnapDY !== null) dy += bestSnapDY;
         }
     } else {
-        state.snapPoint = null; 
+        state.snapPoint = null;
     }
 
-    state.selectedLayers.forEach((layer, index) => {
-        const originalLayer = state.originalLayers[index];
+    state.transformGroup.forEach((layer, index) => {
+        const originalLayer = state.originalTransformGroup[index];
 
-        if (layer.type === 'path') {
-            const step = layer.hasPressure ? 3 : 2;
-            for (let i = 0; i < layer.points.length; i += step) {
-                layer.points[i] = originalLayer.points[i] + dx;
-                layer.points[i+1] = originalLayer.points[i+1] + dy;
+        if (['rect', 'image', 'text', 'pdf', 'sticker'].includes(layer.type)) {
+            layer.x = originalLayer.x + dx;
+            layer.y = originalLayer.y + dy;
+            if (layer.type === 'sticker' && window.stickerApp && window.stickerApp.stickers) {
+                const s = window.stickerApp.stickers.find(st => st.id === layer.id);
+                if (s) {
+                    s.x = layer.x;
+                    s.y = layer.y;
+                }
             }
         }
-        else if (['rect', 'image', 'text', 'pdf'].includes(layer.type)) { 
-            layer.x = originalLayer.x + dx; 
-            layer.y = originalLayer.y + dy; 
+        else if (layer.type === 'parallelogram') {
+            layer.x = originalLayer.x + dx;
+            layer.y = originalLayer.y + dy;
         }
-        else if (layer.type === 'parallelogram') { 
-            layer.x = originalLayer.x + dx; 
-            layer.y = originalLayer.y + dy; 
+        else if (layer.type === 'parallelepiped') {
+            layer.x = originalLayer.x + dx;
+            layer.y = originalLayer.y + dy;
         }
-        else if (layer.type === 'parallelepiped') { 
-            layer.x = originalLayer.x + dx; 
-            layer.y = originalLayer.y + dy; 
+        else if (layer.type === 'cone') {
+            layer.cx = originalLayer.cx + dx;
+            layer.baseY = originalLayer.baseY + dy;
+            if (layer.apex) {
+                layer.apex.x = originalLayer.apex.x + dx;
+                layer.apex.y = originalLayer.apex.y + dy;
+            }
         }
-        else if (layer.type === 'cone') { 
-            layer.cx = originalLayer.cx + dx; 
-            layer.baseY = originalLayer.baseY + dy; 
-            if (layer.apex) { 
-                layer.apex.x = originalLayer.apex.x + dx; 
-                layer.apex.y = originalLayer.apex.y + dy; 
-            } 
+        else if (layer.type === 'frustum') {
+            layer.cx = originalLayer.cx + dx;
+            layer.baseY = originalLayer.baseY + dy;
+            layer.topY = originalLayer.topY + dy;
         }
-        else if (layer.type === 'frustum') { 
-            layer.cx = originalLayer.cx + dx; 
-            layer.baseY = originalLayer.baseY + dy; 
-            layer.topY = originalLayer.topY + dy; 
-        }
-        else if (['sphere', 'ellipse', 'truncated-sphere'].includes(layer.type)) { 
-            layer.cx = originalLayer.cx + dx; 
-            layer.cy = originalLayer.cy + dy; 
+        else if (['sphere', 'ellipse', 'truncated-sphere'].includes(layer.type)) {
+            layer.cx = originalLayer.cx + dx;
+            layer.cy = originalLayer.cy + dy;
             if (layer.cutY !== undefined) {
                 layer.cutY = originalLayer.cutY + dy;
             }
         }
-        else if (layer.type === 'triangle') { 
-            layer.p1.x = originalLayer.p1.x + dx; layer.p1.y = originalLayer.p1.y + dy; 
-            layer.p2.x = originalLayer.p2.x + dx; layer.p2.y = originalLayer.p2.y + dy; 
-            layer.p3.x = originalLayer.p3.x + dx; layer.p3.y = originalLayer.p3.y + dy; 
+        else if (layer.type === 'triangle') {
+            layer.p1.x = originalLayer.p1.x + dx; layer.p1.y = originalLayer.p1.y + dy;
+            layer.p2.x = originalLayer.p2.x + dx; layer.p2.y = originalLayer.p2.y + dy;
+            layer.p3.x = originalLayer.p3.x + dx; layer.p3.y = originalLayer.p3.y + dy;
         }
-        else if (['trapezoid', 'rhombus'].includes(layer.type)) { 
-            layer.p1.x = originalLayer.p1.x + dx; layer.p1.y = originalLayer.p1.y + dy; 
-            layer.p2.x = originalLayer.p2.x + dx; layer.p2.y = originalLayer.p2.y + dy; 
-            layer.p3.x = originalLayer.p3.x + dx; layer.p3.y = originalLayer.p3.y + dy; 
-            layer.p4.x = originalLayer.p4.x + dx; layer.p4.y = originalLayer.p4.y + dy; 
+        else if (['trapezoid', 'rhombus'].includes(layer.type)) {
+            layer.p1.x = originalLayer.p1.x + dx; layer.p1.y = originalLayer.p1.y + dy;
+            layer.p2.x = originalLayer.p2.x + dx; layer.p2.y = originalLayer.p2.y + dy;
+            layer.p3.x = originalLayer.p3.x + dx; layer.p3.y = originalLayer.p3.y + dy;
+            layer.p4.x = originalLayer.p4.x + dx; layer.p4.y = originalLayer.p4.y + dy;
         }
-        else if (layer.type === 'curve') { 
-            layer.nodes.forEach((node, i) => { 
+        // --- ИЗМЕНЕНИЕ: Корректная обработка path (массив чисел) ---
+        else if (layer.type === 'path') {
+            const step = layer.hasPressure ? 3 : 2;
+            for (let i = 0; i < layer.points.length; i += step) {
+                layer.points[i] = originalLayer.points[i] + dx;
+                layer.points[i + 1] = originalLayer.points[i + 1] + dy;
+            }
+        }
+        // -----------------------------------------------------------
+        else if (layer.type === 'curve') {
+            layer.nodes.forEach((node, i) => {
                 const originalNode = originalLayer.nodes[i];
                 node.p.x = originalNode.p.x + dx;
                 node.p.y = originalNode.p.y + dy;
-                if(node.h1) {
+                if (node.h1) {
                     node.h1.x = originalNode.h1.x + dx;
                     node.h1.y = originalNode.h1.y + dy;
                 }
-                 if(node.h2) {
+                if (node.h2) {
                     node.h2.x = originalNode.h2.x + dx;
                     node.h2.y = originalNode.h2.y + dy;
                 }
-            }); 
+            });
         }
-        else if (layer.type === 'line') { 
-            layer.x1 = originalLayer.x1 + dx; layer.y1 = originalLayer.y1 + dy; 
-            layer.x2 = originalLayer.x2 + dx; layer.y2 = originalLayer.y2 + dy; 
+        else if (layer.type === 'line' || layer.type === 'arrow') {
+            layer.x1 = originalLayer.x1 + dx; layer.y1 = originalLayer.y1 + dy;
+            layer.x2 = originalLayer.x2 + dx; layer.y2 = originalLayer.y2 + dy;
         }
         else if (['pyramid', 'truncated-pyramid'].includes(layer.type)) {
-            if (layer.apex) { 
-                layer.apex.x = originalLayer.apex.x + dx; 
-                layer.apex.y = originalLayer.apex.y + dy; 
+            if (layer.apex) {
+                layer.apex.x = originalLayer.apex.x + dx;
+                layer.apex.y = originalLayer.apex.y + dy;
             }
             Object.keys(layer.base).forEach(key => {
                 layer.base[key].x = originalLayer.base[key].x + dx;
@@ -197,6 +183,26 @@ export function handleMove(state, pos, event) {
     });
 }
 
+function updateTextImageLive(layer, state) {
+    if (layer.isGeneratingLiveImage) return;
+    layer.isGeneratingLiveImage = true;
+
+    createTextImage(layer, true).then(img => {
+        layer.isGeneratingLiveImage = false;
+        if (img) {
+            layer.cachedImage = img;
+            if (state.tileManager) state.tileManager.invalidateLayer(layer, state);
+            if (state.redrawInteraction) {
+                state.redrawInteraction();
+            } else if (state.redraw) {
+                state.redraw();
+            }
+        }
+    }).catch(() => {
+        layer.isGeneratingLiveImage = false;
+    });
+}
+
 export function handleScale(state, pos, event) {
     const shouldSnap = (state.snappingMode === 'manual' && event.altKey) || (state.snappingMode === 'auto' && !event.altKey);
     let finalPos = pos;
@@ -204,23 +210,23 @@ export function handleScale(state, pos, event) {
         const SNAP_THRESHOLD = 10 / state.zoom;
         const snappedX = snapToGrid(pos.x);
         const snappedY = snapToGrid(pos.y);
-        
+
         const finalX = (Math.abs(snappedX - pos.x) < SNAP_THRESHOLD) ? snappedX : pos.x;
         const finalY = (Math.abs(snappedY - pos.y) < SNAP_THRESHOLD) ? snappedY : pos.y;
         finalPos = { x: finalX, y: finalY };
     }
-    
+
     const oBox = state.originalBox;
     if (!oBox) return;
 
     const handle = state.scalingHandle;
     const rotation = hitTest.getSelectionRotation(state.selectedLayers, state.groupRotation);
     const pivot = { x: oBox.x + oBox.width / 2, y: oBox.y + oBox.height / 2 };
-    
+
     const localPos = rotatePoint(finalPos, pivot, -rotation);
 
     let newLeft = oBox.x, newTop = oBox.y, newRight = oBox.x + oBox.width, newBottom = oBox.y + oBox.height;
-    
+
     switch (handle) {
         case 'topLeft': newLeft = localPos.x; newTop = localPos.y; break;
         case 'topRight': newRight = localPos.x; newTop = localPos.y; break;
@@ -232,7 +238,14 @@ export function handleScale(state, pos, event) {
         case 'right': newRight = localPos.x; break;
     }
 
-    if (event.shiftKey && oBox.width > 0 && oBox.height > 0) {
+    const hasImageOrPdf = state.selectedLayers.some(l => l.type === 'image' || l.type === 'pdf');
+    const proportionalSetting = state.proportionalScale !== false; // true по умолчанию
+    const isProportionalDefault = hasImageOrPdf && proportionalSetting;
+    
+    // Shift инвертирует поведение: если по умолчанию пропорционально, Shift сделает свободно, и наоборот
+    const shouldScaleProportionally = isProportionalDefault ? !event.shiftKey : event.shiftKey;
+
+    if (shouldScaleProportionally && oBox.width > 0 && oBox.height > 0) {
         const aspect = oBox.width / oBox.height;
         let newW = Math.abs(newRight - newLeft);
         let newH = Math.abs(newBottom - newTop);
@@ -248,7 +261,7 @@ export function handleScale(state, pos, event) {
         } else {
             const ratioW = newW / oBox.width;
             const ratioH = newH / oBox.height;
-            if (ratioW > ratioH) { newH = newW / aspect; } 
+            if (ratioW > ratioH) { newH = newW / aspect; }
             else { newW = newH * aspect; }
 
             if (handle.includes('left')) newLeft = newRight - newW; else newRight = newLeft + newW;
@@ -272,9 +285,9 @@ export function handleScale(state, pos, event) {
 
     const scaleX = oBox.width > 0 ? nW / oBox.width : 1;
     const scaleY = oBox.height > 0 ? nH / oBox.height : 1;
-    
-    state.selectedLayers.forEach((layer, index) => {
-        const originalLayer = state.originalLayers[index];
+
+    state.transformGroup.forEach((layer, index) => {
+        const originalLayer = state.originalTransformGroup[index];
         const originalRx = originalLayer.rx ?? originalLayer.r;
         const originalRy = originalLayer.ry ?? originalLayer.r;
         const newLayerProps = {
@@ -288,14 +301,72 @@ export function handleScale(state, pos, event) {
             ry: originalRy * scaleY,
         };
 
-        if (['rect', 'image', 'text', 'pdf'].includes(layer.type)) { 
+        // Спец. логика для текста (reflow vs scale)
+        if (layer.type === 'text') {
+            layer.x = newLayerProps.x;
+            layer.y = newLayerProps.y;
+
+            if (!['left', 'right', 'top', 'bottom'].includes(handle)) {
+                // Угловое масштабирование: меняем fontSize и оба размера
+                const avgScale = (scaleX + scaleY) / 2;
+                layer.fontSize = originalLayer.fontSize * avgScale;
+                layer.width = newLayerProps.width;
+                layer.height = newLayerProps.height;
+
+                if (layer.content) {
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = originalLayer.content;
+                    const elementsWithFont = tempDiv.querySelectorAll('*');
+                    elementsWithFont.forEach(el => {
+                        if (el.style.fontSize) {
+                            const currentPx = parseFloat(el.style.fontSize);
+                            if (!isNaN(currentPx)) {
+                                el.style.fontSize = (currentPx * avgScale) + 'px';
+                            }
+                        }
+                    });
+                    layer.content = tempDiv.innerHTML;
+                }
+
+            } else if (['left', 'right'].includes(handle)) {
+                // Горизонтальное: только ширина меняется, высота пересчитается в renderer.js
+                layer.width = newLayerProps.width;
+
+            } else {
+                // Вертикальное (top/bottom): высота меняется пользователем
+                layer.width = newLayerProps.width;
+                layer.height = newLayerProps.height;
+            }
+
+            // Запускаем фоновое обновление картинки с переносом строк
+            updateTextImageLive(layer, state);
+
+            // Синхронизируем DOM-редактор, если текст редактируется
+            if (layer.isEditing && state.syncTextEditorWithCanvas) {
+                state.syncTextEditorWithCanvas(state);
+            }
+            return;
+        }
+
+        if (['rect', 'image', 'pdf', 'sticker'].includes(layer.type)) {
             Object.assign(layer, { x: newLayerProps.x, y: newLayerProps.y, width: newLayerProps.width, height: newLayerProps.height });
+            if (layer.type === 'sticker' && window.stickerApp && window.stickerApp.stickers) {
+                const s = window.stickerApp.stickers.find(st => st.id === layer.id);
+                if (s) {
+                    s.x = layer.x;
+                    s.y = layer.y;
+                    s.w = layer.width;
+                    s.h = layer.height;
+                    s.element.style.width = s.w + 'px';
+                    s.element.style.height = s.h + 'px';
+                }
+            }
         }
         else if (layer.type === 'parallelogram') { Object.assign(layer, { x: newLayerProps.x, y: newLayerProps.y, width: newLayerProps.width, height: newLayerProps.height, slantOffset: originalLayer.slantOffset * scaleX }); }
         else if (layer.type === 'parallelepiped') { Object.assign(layer, { x: newLayerProps.x, y: newLayerProps.y, width: newLayerProps.width, height: newLayerProps.height, depthOffset: { x: originalLayer.depthOffset.x * scaleX, y: originalLayer.depthOffset.y * scaleY } }); }
         else if (layer.type === 'cone') { layer.baseY = finalBoxTopLeft.y + (originalLayer.baseY - oBox.y) * scaleY; layer.apex.y = finalBoxTopLeft.y + (originalLayer.apex.y - oBox.y) * scaleY; layer.cx = newLayerProps.cx; layer.apex.x = newLayerProps.cx; layer.rx = newLayerProps.rx; layer.ry = newLayerProps.ry; }
         else if (layer.type === 'frustum') { layer.baseY = finalBoxTopLeft.y + (originalLayer.baseY - oBox.y) * scaleY; layer.topY = finalBoxTopLeft.y + (originalLayer.topY - oBox.y) * scaleY; layer.cx = newLayerProps.cx; layer.rx1 = originalLayer.rx1 * scaleX; layer.ry1 = originalLayer.ry1 * scaleY; layer.rx2 = originalLayer.rx2 * scaleX; layer.ry2 = originalLayer.ry2 * scaleY; }
-        else if (layer.type === 'sphere') { 
+        else if (layer.type === 'sphere') {
             Object.assign(layer, { cx: newLayerProps.cx, cy: newLayerProps.cy, rx: newLayerProps.rx, ry: newLayerProps.ry });
             delete layer.r;
         }
@@ -323,8 +394,9 @@ export function handleScale(state, pos, event) {
             delete layer.r;
         }
         else if (['triangle', 'trapezoid', 'rhombus'].includes(layer.type)) {
-            ['p1', 'p2', 'p3', 'p4'].forEach(p => { if(layer[p]) { layer[p] = { x: finalBoxTopLeft.x + (originalLayer[p].x - oBox.x) * scaleX, y: finalBoxTopLeft.y + (originalLayer[p].y - oBox.y) * scaleY }; } });
+            ['p1', 'p2', 'p3', 'p4'].forEach(p => { if (layer[p]) { layer[p] = { x: finalBoxTopLeft.x + (originalLayer[p].x - oBox.x) * scaleX, y: finalBoxTopLeft.y + (originalLayer[p].y - oBox.y) * scaleY }; } });
         }
+        // --- ИЗМЕНЕНИЕ: Корректная обработка path при скейлинге ---
         else if (layer.type === 'path') {
             const newPoints = [];
             const step = originalLayer.hasPressure ? 3 : 2;
@@ -334,20 +406,21 @@ export function handleScale(state, pos, event) {
 
                 const newX = finalBoxTopLeft.x + (originalX - oBox.x) * scaleX;
                 const newY = finalBoxTopLeft.y + (originalY - oBox.y) * scaleY;
-                
+
                 newPoints.push(newX, newY);
-                
+
                 if (originalLayer.hasPressure) {
                     newPoints.push(originalLayer.points[i + 2]);
                 }
             }
             layer.points = newPoints;
         }
+        // ---------------------------------------------------------
         else if (layer.type === 'curve') { layer.nodes = originalLayer.nodes.map(node => ({ p: { x: finalBoxTopLeft.x + (node.p.x - oBox.x) * scaleX, y: finalBoxTopLeft.y + (node.p.y - oBox.y) * scaleY }, h1: node.h1 ? { x: finalBoxTopLeft.x + (node.h1.x - oBox.x) * scaleX, y: finalBoxTopLeft.y + (node.h1.y - oBox.y) * scaleY } : null, h2: node.h2 ? { x: finalBoxTopLeft.x + (node.h2.x - oBox.x) * scaleX, y: finalBoxTopLeft.y + (node.h2.y - oBox.y) * scaleY } : null, type: node.type })); }
-        else if (layer.type === 'line') { layer.x1 = finalBoxTopLeft.x + (originalLayer.x1 - oBox.x) * scaleX; layer.y1 = finalBoxTopLeft.y + (originalLayer.y1 - oBox.y) * scaleY; layer.x2 = finalBoxTopLeft.x + (originalLayer.x2 - oBox.x) * scaleX; layer.y2 = finalBoxTopLeft.y + (originalLayer.y2 - oBox.y) * scaleY; }
+        else if (layer.type === 'line' || layer.type === 'arrow') { layer.x1 = finalBoxTopLeft.x + (originalLayer.x1 - oBox.x) * scaleX; layer.y1 = finalBoxTopLeft.y + (originalLayer.y1 - oBox.y) * scaleY; layer.x2 = finalBoxTopLeft.x + (originalLayer.x2 - oBox.x) * scaleX; layer.y2 = finalBoxTopLeft.y + (originalLayer.y2 - oBox.y) * scaleY; }
         else if (['pyramid', 'truncated-pyramid'].includes(layer.type)) {
             if (layer.apex) { layer.apex = { x: finalBoxTopLeft.x + (originalLayer.apex.x - oBox.x) * scaleX, y: finalBoxTopLeft.y + (originalLayer.apex.y - oBox.y) * scaleY }; }
-            ['base', 'top'].forEach(part => { if(layer[part]) { Object.keys(layer[part]).forEach(p => { layer[part][p] = { x: finalBoxTopLeft.x + (originalLayer[part][p].x - oBox.x) * scaleX, y: finalBoxTopLeft.y + (originalLayer[part][p].y - oBox.y) * scaleY }; }); } });
+            ['base', 'top'].forEach(part => { if (layer[part]) { Object.keys(layer[part]).forEach(p => { layer[part][p] = { x: finalBoxTopLeft.x + (originalLayer[part][p].x - oBox.x) * scaleX, y: finalBoxTopLeft.y + (originalLayer[part][p].y - oBox.y) * scaleY }; }); } });
         }
     });
 }
@@ -360,13 +433,13 @@ export function handleRotate(state, pos, event) {
         const snapAngle = 15 * (Math.PI / 180);
         deltaAngle = Math.round(deltaAngle / snapAngle) * snapAngle;
     }
-    
-    if (state.selectedLayers.length > 1) {
+
+    if (state.transformGroup.length > 1) {
         state.groupRotation = deltaAngle;
-    } 
-    else if (state.selectedLayers.length === 1) {
-        const layer = state.selectedLayers[0];
-        const originalLayer = state.originalLayers[0];
+    }
+    else if (state.transformGroup.length === 1) {
+        const layer = state.transformGroup[0];
+        const originalLayer = state.originalTransformGroup[0];
         layer.rotation = (originalLayer.rotation || 0) + deltaAngle;
     }
 }
@@ -421,20 +494,24 @@ export function handleMovePivot(state, pos) {
         if (layer.topY !== undefined) layer.topY = originalLayer.topY + dy;
         if (layer.cutY !== undefined) layer.cutY = originalLayer.cutY + dy;
         if (layer.apex) layer.apex = applyOffset(originalLayer.apex, { x: dx, y: dy });
-    } else if (layer.type === 'path') {
+    }
+    // --- ИЗМЕНЕНИЕ: Корректная обработка path при перемещении пивота ---
+    else if (layer.type === 'path') {
         const step = layer.hasPressure ? 3 : 2;
         for (let i = 0; i < layer.points.length; i += step) {
             layer.points[i] = originalLayer.points[i] + dx;
             layer.points[i + 1] = originalLayer.points[i + 1] + dy;
         }
-    } else if (layer.type === 'curve') {
+    }
+    // -------------------------------------------------------------------
+    else if (layer.type === 'curve') {
         layer.nodes.forEach((node, i) => {
             const originalNode = originalLayer.nodes[i];
             node.p = applyOffset(originalNode.p, { x: dx, y: dy });
             if (node.h1) node.h1 = applyOffset(originalNode.h1, { x: dx, y: dy });
             if (node.h2) node.h2 = applyOffset(originalNode.h2, { x: dx, y: dy });
         });
-    } else if (layer.type === 'line') {
+    } else if (layer.type === 'line' || layer.type === 'arrow') {
         layer.x1 = originalLayer.x1 + dx; layer.y1 = originalLayer.y1 + dy;
         layer.x2 = originalLayer.x2 + dx; layer.y2 = originalLayer.y2 + dy;
     } else if (['pyramid', 'truncated-pyramid'].includes(layer.type)) {
@@ -468,7 +545,7 @@ export function handleEditCurve(state, pos, event) {
         const SNAP_THRESHOLD = 10 / state.zoom;
         const snappedX = snapToGrid(pos.x);
         const snappedY = snapToGrid(pos.y);
-        
+
         finalPos.x = (Math.abs(snappedX - pos.x) < SNAP_THRESHOLD) ? snappedX : pos.x;
         finalPos.y = (Math.abs(snappedY - pos.y) < SNAP_THRESHOLD) ? snappedY : pos.y;
     }
@@ -498,13 +575,13 @@ export function handleEditCurve(state, pos, event) {
 
         node[handleKey].x = originalNode[handleKey].x + dx;
         node[handleKey].y = originalNode[handleKey].y + dy;
-        
+
         if (node.type === 'smooth' && node[otherHandleKey]) {
             const vx = node.p.x - node[handleKey].x;
             const vy = node.p.y - node[handleKey].y;
             const originalDist = Math.hypot(originalNode[otherHandleKey].x - originalNode.p.x, originalNode[otherHandleKey].y - originalNode.p.y);
             const currentDist = Math.hypot(vx, vy);
-            
+
             if (currentDist > 0) {
                 const newX = node.p.x + (vx / currentDist) * originalDist;
                 const newY = node.p.y + (vy / currentDist) * originalDist;
@@ -534,7 +611,30 @@ export function endSelectionBox(state, pos, event) {
         height: Math.abs(pos.y - state.startPos.y)
     };
 
-    const layersInBox = state.layers.filter(layer => hitTest.layerInRect(layer, selBox));
+    let layersInBox = state.layers.filter(layer => hitTest.layerInRect(layer, selBox));
+
+    // Map child layers of stickers to their parent stickers when not in edit mode
+    layersInBox = layersInBox.map(layer => {
+        if (layer.parentId) {
+            const parentSticker = state.layers.find(l => l.id === layer.parentId && l.type === 'sticker');
+            if (parentSticker && state.editingAnnotationsLayerId !== parentSticker.id) {
+                return parentSticker;
+            }
+        }
+        return layer;
+    });
+    layersInBox = Array.from(new Set(layersInBox));
+
+    if (state.editingAnnotationsLayerId) {
+        const parentLayer = state.layers.find(l => l.id === state.editingAnnotationsLayerId);
+        layersInBox = layersInBox.filter(layer => {
+            if (layer.parentId !== state.editingAnnotationsLayerId) return false;
+            if (parentLayer && parentLayer.type === 'pdf') {
+                return layer.parentPage === parentLayer.currentPage;
+            }
+            return true;
+        });
+    }
 
     if (event.ctrlKey || event.metaKey) {
         const idsToDeselect = new Set(layersInBox.map(l => l.id));
@@ -550,3 +650,4 @@ export function endSelectionBox(state, pos, event) {
         state.selectedLayers = layersInBox;
     }
 }
+// --- END OF FILE js/actions.js ---

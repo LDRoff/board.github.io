@@ -1,7 +1,9 @@
-import { getEditorTextarea } from './text.js';
-import { getGroupBoundingBox } from './geometry.js';
-import { drawLayer } from './renderer.js'; 
-import * as utils from './utils.js';
+import { getEditorTextarea } from './text.js?v=1.2.3';
+import { getGroupBoundingBox } from './geometry.js?v=1.2.3';
+import * as geo from './geometry.js?v=1.2.3';
+import { drawLayer } from './renderer.js?v=1.2.3';
+import * as utils from './utils.js?v=1.2.3';
+import { updateCursor } from './ui.js?v=1.2.3';
 
 const shapes2DOrder = ['rect', 'ellipse', 'line', 'curve', 'parallelogram', 'triangle', 'trapezoid', 'rhombus'];
 const shapes3DOrder = ['sphere', 'cone', 'parallelepiped', 'pyramid', 'frustum', 'truncated-pyramid', 'truncated-sphere'];
@@ -16,17 +18,29 @@ export async function copySelectionToClipboard(canvasState, cut = false) {
     }
 
     try {
-        const layersJson = JSON.stringify(canvasState.selectedLayers.map(layer => {
+        const layersToCopy = new Set();
+        canvasState.selectedLayers.forEach(l => {
+            layersToCopy.add(l);
+            if (l.type === 'sticker' || l.type === 'pdf' || l.type === 'image') {
+                canvasState.layers.filter(child => child.parentId === l.id).forEach(child => {
+                    layersToCopy.add(child);
+                });
+            }
+        });
+        const layersList = Array.from(layersToCopy);
+
+        const layersJson = JSON.stringify(layersList.map(layer => {
             const clonedLayer = { ...layer };
             delete clonedLayer.image;
             delete clonedLayer.pdfDoc;
             delete clonedLayer.renderedPages;
+            delete clonedLayer.cachedImage;
             return clonedLayer;
         }));
-        
+
         const jsonBlob = new Blob([layersJson], { type: CUSTOM_MIME_TYPE });
 
-        const box = getGroupBoundingBox(canvasState.selectedLayers);
+        const box = getGroupBoundingBox(layersList);
         if (!box || box.width === 0 || box.height === 0) return;
 
         const offscreenCanvas = document.createElement('canvas');
@@ -35,8 +49,8 @@ export async function copySelectionToClipboard(canvasState, cut = false) {
         const offscreenCtx = offscreenCanvas.getContext('2d');
 
         offscreenCtx.translate(-box.x, -box.y);
-        
-        canvasState.selectedLayers.forEach(layer => {
+
+        layersList.forEach(layer => {
             drawLayer(offscreenCtx, layer, { zoom: 1 });
         });
 
@@ -49,9 +63,14 @@ export async function copySelectionToClipboard(canvasState, cut = false) {
         await navigator.clipboard.write([clipboardItem]);
 
         if (cut) {
-            const layersToDelete = utils.cloneLayersForAction(canvasState.selectedLayers);
+            const layersToDelete = utils.cloneLayersForAction(layersList);
             const idsToDelete = new Set(layersToDelete.map(l => l.id));
-            
+
+            // Инвалидация перед удалением
+            if (canvasState.tileManager) {
+                layersToDelete.forEach(layer => canvasState.tileManager.invalidateLayer(layer));
+            }
+
             canvasState.saveState({ // commitChange
                 type: 'deletion',
                 before: layersToDelete,
@@ -60,6 +79,9 @@ export async function copySelectionToClipboard(canvasState, cut = false) {
 
             canvasState.layers = canvasState.layers.filter(layer => !idsToDelete.has(layer.id));
             canvasState.selectedLayers = [];
+            if (window.stickerApp) {
+                window.stickerApp.syncStickersAndLinks(canvasState.layers);
+            }
             canvasState.redraw();
             canvasState.updateFloatingToolbar();
         }
@@ -86,15 +108,25 @@ export async function pasteFromClipboard(canvasState) {
                 const blob = await item.getType(CUSTOM_MIME_TYPE);
                 const json = await blob.text();
                 const layersToPaste = JSON.parse(json);
-                
+
+                const idMap = new Map();
+                layersToPaste.forEach(layer => {
+                    const oldId = layer.id;
+                    const newId = 'layer_' + Date.now() + '_' + Math.floor(Math.random() * 1000000);
+                    layer.id = newId;
+                    idMap.set(oldId, newId);
+                });
+
                 const offset = 20 / canvasState.zoom;
                 layersToPaste.forEach(layer => {
-                    layer.id = Date.now() + Math.random();
+                    if (layer.parentId && idMap.has(layer.parentId)) {
+                        layer.parentId = idMap.get(layer.parentId);
+                    }
 
                     if (layer.x !== undefined) { layer.x += offset; layer.y += offset; }
                     if (layer.cx !== undefined) { layer.cx += offset; layer.cy += offset; }
                     if (layer.x1 !== undefined) { layer.x1 += offset; layer.y1 += offset; layer.x2 += offset; layer.y2 += offset; }
-                    
+
                     if (layer.type === 'path' && layer.points && typeof layer.points[0] === 'number') {
                         const step = layer.hasPressure ? 3 : 2;
                         for (let i = 0; i < layer.points.length; i += step) {
@@ -105,11 +137,13 @@ export async function pasteFromClipboard(canvasState) {
                         layer.points.forEach(p => { p.x += offset; p.y += offset; });
                     }
 
-                    if (layer.nodes) { layer.nodes.forEach(n => {
-                        if (n.p) { n.p.x += offset; n.p.y += offset; }
-                        if (n.h1) { n.h1.x += offset; n.h1.y += offset; }
-                        if (n.h2) { n.h2.x += offset; n.h2.y += offset; }
-                    });}
+                    if (layer.nodes) {
+                        layer.nodes.forEach(n => {
+                            if (n.p) { n.p.x += offset; n.p.y += offset; }
+                            if (n.h1) { n.h1.x += offset; n.h1.y += offset; }
+                            if (n.h2) { n.h2.x += offset; n.h2.y += offset; }
+                        });
+                    }
                     if (layer.p1) {
                         const points = ['p1', 'p2', 'p3', 'p4', 'base', 'top', 'apex'];
                         for (const key of points) {
@@ -124,23 +158,38 @@ export async function pasteFromClipboard(canvasState) {
                 });
 
                 const liveLayers = await utils.rehydrateLayers(layersToPaste);
-                
+
+                // Сначала добавляем слои, затем фиксируем изменение: история
+                // снимает состояние из canvasState.layers уже с вставленными объектами.
+                canvasState.layers.push(...liveLayers);
+                canvasState.selectedLayers = liveLayers;
+
                 canvasState.saveState({ // commitChange
                     type: 'creation',
                     before: [],
                     after: liveLayers,
                 });
 
-                canvasState.layers.push(...liveLayers);
-                canvasState.selectedLayers = liveLayers;
-                
+                if (window.stickerApp) {
+                    window.stickerApp.syncStickersAndLinks(canvasState.layers);
+                }
+
+                // --- ИЗМЕНЕНИЕ: Инвалидация плиток для новых вставленных объектов ---
+                if (canvasState.spatialGrid) {
+                    canvasState.spatialGrid = utils.buildSpatialGrid(canvasState.layers);
+                }
+                if (canvasState.tileManager) {
+                    liveLayers.forEach(layer => canvasState.tileManager.invalidateLayer(layer));
+                }
+                // --------------------------------------------------------------------
+
                 const selectButton = document.querySelector('button[data-tool="select"]');
                 if (selectButton) selectButton.click();
-                
+
                 canvasState.redraw();
                 canvasState.updateFloatingToolbar();
                 contentPasted = true;
-                break; 
+                break;
             }
         }
 
@@ -154,7 +203,7 @@ export async function pasteFromClipboard(canvasState) {
                         y: (canvasState.canvas.height / 2 - canvasState.panY) / canvasState.zoom
                     };
                     utils.processImageFile(new File([blob], "pasted_image.png", { type: blob.type }), centerPos, canvasState, canvasState.redraw, canvasState.saveState);
-                    break; 
+                    break;
                 }
             }
         }
@@ -164,16 +213,16 @@ export async function pasteFromClipboard(canvasState) {
 }
 
 export function initializeEventListeners(canvasState, handlers) {
-    const { 
+    const {
         performUndo, performRedo,
         performDeleteSelected,
         performDeleteSelectedCurveNode
     } = handlers;
-    
+
     const drawingCanvas = canvasState.canvas;
 
     window.addEventListener('keydown', (e) => {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT' || e.target.isContentEditable || canvasState.isEditingText) {
             return;
         }
 
@@ -181,6 +230,10 @@ export function initializeEventListeners(canvasState, handlers) {
             switch (e.code) {
                 case 'KeyZ': e.preventDefault(); performUndo(); break;
                 case 'KeyY': e.preventDefault(); performRedo(); break;
+                case 'KeyS':
+                    e.preventDefault();
+                    document.getElementById('saveProjectBtn')?.click();
+                    break;
                 case 'KeyC':
                     e.preventDefault();
                     copySelectionToClipboard(canvasState, false);
@@ -196,18 +249,59 @@ export function initializeEventListeners(canvasState, handlers) {
             }
             return;
         }
-        
+
         if (e.code === 'Enter') {
             if (canvasState.currentAction === 'drawingCurve' && canvasState.tempLayer) {
                 e.preventDefault();
-                if (canvasState.tempLayer.nodes.length > 1) {
+                const nodes = canvasState.tempLayer.nodes;
+
+                // Направляющая показывает продолжение кривой до курсора — при
+                // завершении по Enter добавляем эту точку последним узлом,
+                // иначе кривая обрывается на предыдущем клике.
+                if (nodes.length > 1 && canvasState.lastPointerClientPos) {
+                    const world = utils.getMousePos(canvasState.lastPointerClientPos, canvasState);
+                    const lastNode = nodes[nodes.length - 1];
+                    const minDistance = 5 / (canvasState.zoom || 1);
+                    if (Math.hypot(world.x - lastNode.p.x, world.y - lastNode.p.y) > minDistance) {
+                        const lastH1 = lastNode.h1 || lastNode.p;
+                        nodes.push({
+                            p: { ...world },
+                            h1: { ...world },
+                            h2: { x: 2 * lastNode.p.x - lastH1.x, y: 2 * lastNode.p.y - lastH1.y },
+                            type: 'smooth'
+                        });
+                    }
+                }
+
+                if (nodes.length > 1) {
+                    utils.smoothCurveHandles(nodes);
                     const newLayer = utils.cloneLayersForAction([canvasState.tempLayer])[0];
+                    delete newLayer.isEditing;
                     canvasState.layers.push(newLayer);
+
+                    if (canvasState.tileManager) {
+                        canvasState.tileManager.invalidateLayer(newLayer, canvasState);
+                    }
+                    if (canvasState.spatialGrid) {
+                        const box = geo.getTransformedBoundingBox(newLayer);
+                        if (box) {
+                            const startCol = Math.floor(box.x / 500); const endCol = Math.floor((box.x + box.width) / 500);
+                            const startRow = Math.floor(box.y / 500); const endRow = Math.floor((box.y + box.height) / 500);
+                            for (let r = startRow; r <= endRow; r++) {
+                                for (let c = startCol; c <= endCol; c++) {
+                                    const cellKey = `${c}_${r}`;
+                                    if (!canvasState.spatialGrid.has(cellKey)) canvasState.spatialGrid.set(cellKey, []);
+                                    canvasState.spatialGrid.get(cellKey).push(newLayer);
+                                }
+                            }
+                        }
+                    }
+
                     canvasState.saveState({ type: 'creation', before: [], after: [newLayer] });
                 }
-                canvasState.currentAction = 'none';
-                canvasState.tempLayer = null;
-                canvasState.redraw();
+
+                utils.endTransientInteraction(canvasState);
+                if (canvasState.redraw) canvasState.redraw();
                 return;
             }
         }
@@ -215,9 +309,27 @@ export function initializeEventListeners(canvasState, handlers) {
         switch (e.code) {
             case 'Escape':
                 e.preventDefault();
+                {
+                    // Сначала закрываем открытые модалки, иначе Esc
+                    // снимает выделение «сквозь» диалог.
+                    const settingsModal = document.getElementById('settings-modal');
+                    if (settingsModal && settingsModal.classList.contains('active')) {
+                        document.getElementById('settings-close-x')?.click();
+                        break;
+                    }
+                    const helpModal = document.getElementById('help-modal');
+                    if (helpModal && helpModal.classList.contains('active')) {
+                        document.getElementById('closeHelpBtnTop')?.click();
+                        break;
+                    }
+                    const clearModal = document.getElementById('confirmClearModal');
+                    if (clearModal && clearModal.classList.contains('active')) {
+                        document.getElementById('cancelClearBtn')?.click();
+                        break;
+                    }
+                }
                 if (canvasState.currentAction.startsWith('drawing')) {
-                    canvasState.currentAction = 'none';
-                    canvasState.tempLayer = null;
+                    utils.endTransientInteraction(canvasState);
                     canvasState.redraw();
                 }
                 else if (canvasState.isEditingText) {
@@ -241,12 +353,42 @@ export function initializeEventListeners(canvasState, handlers) {
                 break;
             case 'KeyB':
                 e.preventDefault();
-                const currentTool = canvasState.activeTool;
-                if (currentTool === 'brush') {
-                    document.querySelector('button[data-tool="smart-brush"]')?.click();
-                } else {
-                    document.querySelector('button[data-tool="brush"]')?.click();
+                {
+                    const isBrushActive = canvasState.activeTool === 'brush' || canvasState.activeTool === 'smart-brush';
+                    // Toggle smart brush enabled state
+                    canvasState.smartBrushEnabled = !canvasState.smartBrushEnabled;
+
+                    if (isBrushActive) {
+                        // Instantly apply to active tool
+                        canvasState.activeTool = canvasState.smartBrushEnabled ? 'smart-brush' : 'brush';
+                        updateCursor(canvasState, null);
+                    } else {
+                        // Switch to brush tool first, in the toggled mode
+                        const brushBtn = document.querySelector('button[data-tool="brush"]');
+                        if (brushBtn) brushBtn.click();
+                    }
+
+                    // Sync UI toggles
+                    const desktopToggle = document.getElementById('desktopSmartBrushToggle');
+                    const mobileToggle = document.getElementById('mobileSmartBrushToggle');
+                    if (desktopToggle) desktopToggle.classList.toggle('active', canvasState.smartBrushEnabled);
+                    if (mobileToggle) mobileToggle.classList.toggle('active', canvasState.smartBrushEnabled);
                 }
+                drawingCanvas.focus({ preventScroll: true });
+                break;
+            case 'KeyV':
+                e.preventDefault();
+                document.querySelector('button[data-tool="select"]')?.click();
+                drawingCanvas.focus({ preventScroll: true });
+                break;
+            case 'KeyP':
+                e.preventDefault();
+                document.querySelector('button[data-tool="brush"]')?.click();
+                drawingCanvas.focus({ preventScroll: true });
+                break;
+            case 'KeyH':
+                e.preventDefault();
+                document.getElementById('panBtn')?.click();
                 drawingCanvas.focus({ preventScroll: true });
                 break;
             case 'KeyE':
@@ -254,9 +396,19 @@ export function initializeEventListeners(canvasState, handlers) {
                 document.querySelector('button[data-tool="eraser"]')?.click();
                 drawingCanvas.focus({ preventScroll: true });
                 break;
+            case 'KeyL':
+                e.preventDefault();
+                document.querySelector('button[data-tool="laser"]')?.click();
+                drawingCanvas.focus({ preventScroll: true });
+                break;
             case 'KeyT':
                 e.preventDefault();
                 document.querySelector('button[data-tool="text"]')?.click();
+                drawingCanvas.focus({ preventScroll: true });
+                break;
+            case 'KeyK':
+                e.preventDefault();
+                document.getElementById('addStickerBtn')?.click();
                 drawingCanvas.focus({ preventScroll: true });
                 break;
             case 'KeyS':
@@ -283,7 +435,7 @@ export function initializeEventListeners(canvasState, handlers) {
                 break;
             case 'KeyI':
                 e.preventDefault();
-                document.getElementById('addImageBtn')?.click();
+                document.getElementById('addImageMenuBtn')?.click();
                 drawingCanvas.focus({ preventScroll: true });
                 break;
             case 'BracketRight': // ]
@@ -298,37 +450,35 @@ export function initializeEventListeners(canvasState, handlers) {
     });
 
     window.addEventListener('paste', async (e) => {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT' || e.target.isContentEditable) {
             return;
         }
         e.preventDefault();
-    
+
         let contentPasted = false;
-        
+
         if (e.clipboardData?.files && e.clipboardData.files.length > 0) {
             const file = Array.from(e.clipboardData.files).find(f => f.type.startsWith('image/'));
             if (file) {
-                e.preventDefault();
                 const centerPos = {
                     x: (canvasState.canvas.width / 2 - canvasState.panX) / canvasState.zoom,
                     y: (canvasState.canvas.height / 2 - canvasState.panY) / canvasState.zoom
                 };
-                utils.processImageFile(file, centerPos, canvasState, handlers.redraw, handlers.commitChange);
+                utils.processImageFile(file, centerPos, canvasState, canvasState.redraw, canvasState.saveState);
                 contentPasted = true;
             }
         }
-    
+
         if (!contentPasted && e.clipboardData?.items) {
             for (const item of e.clipboardData.items) {
                 if (item.kind === 'file' && item.type.startsWith('image/')) {
                     const file = item.getAsFile();
                     if (file) {
-                        e.preventDefault();
                         const centerPos = {
                             x: (canvasState.canvas.width / 2 - canvasState.panX) / canvasState.zoom,
                             y: (canvasState.canvas.height / 2 - canvasState.panY) / canvasState.zoom
                         };
-                        utils.processImageFile(file, centerPos, canvasState, handlers.redraw, handlers.commitChange);
+                        utils.processImageFile(file, centerPos, canvasState, canvasState.redraw, canvasState.saveState);
                         contentPasted = true;
                         break;
                     }

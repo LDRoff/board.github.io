@@ -1,16 +1,26 @@
+import { TileManager } from './tileManager.js?v=1.2.3';
+
 export function createInitialState() {
     return {
         isDrawing: false,
         layers: [],
+        loadingFiles: [],
         activeTool: 'brush',
         previousTool: 'brush',
         startPos: null,
         selectedLayers: [],
+        editingAnnotationsLayerId: null,
         currentAction: 'none',
         dragStartPos: null,
         scalingHandle: null,
         activeColor: '#000000',
+        laserColor: '#ef4444',
+        nonLaserColor: '#000000',
+        laserStrokes: [],
+        laserStroke: null,
+        activeFillColor: 'transparent',
         activeLineWidth: 2,
+        activeEraserWidth: 40,
         activeLineStyle: 'solid',
         activeTextColor: '#000000',
         activeFontFamily: 'Arial',
@@ -50,12 +60,20 @@ export function createInitialState() {
         justCreatedText: false,
         toolBeforeSpenEraser: null,
         isSpenEraserActive: false,
-        snappingMode: 'auto', // 'manual' or 'auto'
+        snappingMode: 'auto',
         persistentSnapOffset: { x: 0, y: 0 },
         selectedCurveNodeIndex: null,
-        // --- НАЧАЛО ИЗМЕНЕНИЙ ---
+        smartBrushEnabled: false,
+        rulers: [],
+        snapToRuler: true,
+        activePointers: new Set(),
+
+        // --- ИЗМЕНЕНИЯ: Кэширование для оптимизации ---
+        tileManager: new TileManager(),
+        spatialGrid: new Map(),
+        // Возвращаем кэш BBox. Map<layerId, {x, y, width, height}>
         layerBBoxCache: new Map(),
-        isBBoxCacheDirty: true,
-        // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+        // --------------------------------------------
+        activeDrawingSticker: null,
     };
 }
