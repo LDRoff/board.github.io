@@ -1,15 +1,18 @@
-// js/pointerHandlers.js
+// --- START OF FILE js/pointerHandlers.js ---
 
-import * as geo from './geometry.js';
-import * as hitTest from './hitTest.js';
-import * as actions from './actions.js';
-import * as tools from './tools.js';
-import * as utils from './utils.js';
-import * as shapeRecognizer from './shapeRecognizer.js';
-import * as textTool from './text.js';
-import { animateEraserTrail, updateCursor } from './ui.js';
-import { drawLayer, drawSelectionBox } from './renderer.js';
+import * as geo from './geometry.js?v=1.2.2';
+import * as hitTest from './hitTest.js?v=1.2.2';
+import * as actions from './actions.js?v=1.2.2';
+import * as tools from './tools.js?v=1.2.2';
+import * as utils from './utils.js?v=1.2.2';
+import * as shapeRecognizer from './shapeRecognizer.js?v=1.2.2';
+import * as textTool from './text.js?v=1.2.2';
+// --- ИЗМЕНЕНИЕ: Импортируем новые функции для DOM-курсора ---
+import { updateEraserCursor, hideEraserCursor, updateCursor, showRulerSettings, syncRulerSettingsAngle, getHandCursor, getHandGrabbingCursor, getSelectCursor } from './ui.js?v=1.2.2';
+// -----------------------------------------------------------
+import { drawLayer, drawSelectionBox, drawRulers } from './renderer.js?v=1.2.2';
 
+// ... (константы и функции prepareInteractionCache, isSpenButtonPressed, checkAndHandleSpenEraser без изменений) ...
 const TOOLTIP_MESSAGES = {
     drawingParallelogramSlant: 'Потяните, чтобы задать наклон',
     drawingTriangleApex: 'Укажите третью вершину',
@@ -23,36 +26,99 @@ const TOOLTIP_MESSAGES = {
     drawingTruncatedSphere: 'Укажите высоту среза',
 };
 
-/**
- * Подготавливает холсты к интерактивной трансформации.
- * Рисует все невыбранные объекты на кеш-холст один раз.
- */
+function assignParentToTempLayer(state) {
+    if (state.tempLayer && state.activeDrawingSticker) {
+        state.tempLayer.parentId = state.activeDrawingSticker.id;
+        state.tempLayer._parentRef = state.activeDrawingSticker.canvasState.layers.find(l => l.id === state.activeDrawingSticker.id);
+        state.tempLayer.parentPage = 1;
+    }
+}
+
 function prepareInteractionCache(state) {
     state.isInteracting = true;
-    const { cacheCtx, ctx, layers, selectedLayers, cacheCanvas } = state;
-    const selectedIds = new Set(selectedLayers.map(l => l.id));
+    
+    state.redrawInteraction = () => {
+        const { iCtx, selectedLayers, cacheCanvas, interactionCanvas } = state;
+        const dpr = window.devicePixelRatio || 1;
+        
+        iCtx.setTransform(1, 0, 0, 1, 0, 0);
+        iCtx.clearRect(0, 0, interactionCanvas.width, interactionCanvas.height);
+        iCtx.drawImage(cacheCanvas, 0, 0);
 
-    // Очищаем кеш и основной холст для рисования
+        iCtx.save();
+        iCtx.scale(dpr, dpr);
+        iCtx.translate(state.panX, state.panY);
+        iCtx.scale(state.zoom, state.zoom);
+
+        state.transformGroup.forEach(layer => {
+            if (layer.parentId && !state.selectedLayers.some(l => l.id === layer.id)) {
+                const parent = state.layers.find(p => p.id === layer.parentId);
+                if (parent && parent.type === 'pdf' && parent.currentPage !== layer.parentPage) return;
+            }
+            drawLayer(iCtx, layer, state);
+        });
+
+        drawSelectionBox(iCtx, selectedLayers, state);
+        iCtx.restore();
+
+        if (state.editingAnnotationsLayerId) {
+            const sticker = window.stickerApp.stickers.find(s => s.id === state.editingAnnotationsLayerId);
+            if (sticker) {
+                sticker.renderDrawing();
+            }
+        }
+    };
+
+    const { cacheCtx, ctx, layers, selectedLayers, cacheCanvas } = state;
+
+    // Формируем группу для трансформации, включая дочерние элементы PDF
+    state.transformGroup = new Set();
+    selectedLayers.forEach(l => {
+        if (l.id !== state.editingAnnotationsLayerId) {
+            state.transformGroup.add(l);
+        }
+        if (l.type === 'pdf' || l.type === 'image' || l.type === 'sticker') {
+            layers.filter(child => child.parentId === l.id).forEach(child => state.transformGroup.add(child));
+        }
+    });
+    state.transformGroup = Array.from(state.transformGroup);
+    
+    // Если нужно, создаем оригиналы для действий
+    if (['moving', 'scaling', 'rotating', 'movingPivot', 'editingCurve'].includes(state.currentAction)) {
+        state.originalTransformGroup = utils.cloneLayersForAction(state.transformGroup);
+    }
+
+    const selectedIds = new Set(state.transformGroup.map(l => l.id));
+    const dpr = window.devicePixelRatio || 1;
+
+    cacheCtx.setTransform(1, 0, 0, 1, 0, 0);
     cacheCtx.clearRect(0, 0, cacheCanvas.width, cacheCanvas.height);
+
     cacheCtx.save();
+    cacheCtx.scale(dpr, dpr);
     cacheCtx.translate(state.panX, state.panY);
     cacheCtx.scale(state.zoom, state.zoom);
 
-    // Рисуем все НЕвыбранные слои на кеш-холст
     layers.forEach(layer => {
         if (!selectedIds.has(layer.id)) {
             drawLayer(cacheCtx, layer, state);
         }
     });
+
+    // Draw rulers into the cache so they stay visible during interactions (drag/move/resize)
+    drawRulers(cacheCtx, state);
+
     cacheCtx.restore();
 
-    // Очищаем основной холст, чтобы на нем не было "грязи"
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, state.canvas.width, state.canvas.height);
+
+    state.redrawInteraction();
 }
 
 function isSpenButtonPressed(e) {
-  if (e.pointerType !== 'pen') return false;
-  return (e.buttons & 32) !== 0 || (e.buttons & 2) !== 0 || e.button === 5 || e.button === 2;
+    if (e.pointerType !== 'pen') return false;
+    return (e.buttons & 32) !== 0 || (e.buttons & 2) !== 0 || e.button === 5 || e.button === 2;
 }
 
 function checkAndHandleSpenEraser(state, e, callbacks) {
@@ -66,9 +132,11 @@ function checkAndHandleSpenEraser(state, e, callbacks) {
     if (isButtonPressed && !state.isSpenEraserActive) {
         if (state.isDrawing && state.tempLayer) {
             if (state.tempLayer.points && state.tempLayer.points.length > 2) {
-                 const newLayer = utils.cloneLayersForAction([state.tempLayer])[0];
-                 state.layers.push(newLayer);
-                 saveState({ type: 'creation', before: [], after: [newLayer] });
+                const newLayer = utils.cloneLayersForAction([state.tempLayer])[0];
+                utils.bindLayerToParent(state, newLayer);
+                state.layers.push(newLayer);
+                if (state.tileManager) state.tileManager.invalidateLayer(newLayer, state);
+                saveState({ type: 'creation', before: [], after: [newLayer] });
             }
             state.tempLayer = null;
             redrawCallback();
@@ -77,42 +145,59 @@ function checkAndHandleSpenEraser(state, e, callbacks) {
         state.toolBeforeSpenEraser = state.activeTool;
         state.activeTool = 'eraser';
         state.isSpenEraserActive = true;
-        state.isDrawing = true; 
-        
+        state.isDrawing = true;
+
         const pos = utils.getMousePos(e, state);
         state.startPos = pos;
         state.didErase = false;
         state.layersToErase.clear();
         state.canvas.classList.add('cursor-eraser');
-        
-        if (!document.body.classList.contains('no-animations')) {
-            state.lastEraserPos = pos;
-            state.eraserTrailNodes = Array(10).fill(null).map(() => ({ ...pos }));
-            if (state.eraserAnimationId) cancelAnimationFrame(state.eraserAnimationId);
-            animateEraserTrail(state);
-        }
+        state.canvas.style.cursor = utils.getEraserCursorStyle(state.activeEraserWidth, state.zoom, document.body.classList.contains('dark-theme'));
 
-        return true; 
-    
+        // --- ИЗМЕНЕНИЕ: Используем DOM курсор для S-Pen ---
+        updateEraserCursor(e.clientX, e.clientY, state.zoom, true, state.activeEraserWidth);
+        // --------------------------------------------------
+
+        return true;
+
     } else if (!isButtonPressed && state.isSpenEraserActive) {
         if (state.isDrawing && state.didErase) {
             const layersToErase = utils.cloneLayersForAction(Array.from(state.layersToErase));
+
+            if (state.tileManager) {
+                layersToErase.forEach(layer => state.tileManager.invalidateLayer(layer, state));
+            }
+
             const idsToErase = new Set(layersToErase.map(l => l.id));
-            saveState({ type: 'deletion', before: layersToErase, after: [] });
             state.layers = state.layers.filter(layer => !idsToErase.has(layer.id));
+
+            saveState({ type: 'deletion', before: layersToErase, after: [] });
+
+            if (state.spatialGrid) {
+                state.spatialGrid = utils.buildSpatialGrid(state.layers);
+            }
+
             redrawCallback();
         }
-        
+
         state.isDrawing = false;
         state.didErase = false;
         state.layersToErase.clear();
-        if (state.eraserAnimationId) cancelAnimationFrame(state.eraserAnimationId);
+
+        state.iCtx.setTransform(1, 0, 0, 1, 0, 0);
         state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
 
         state.activeTool = state.toolBeforeSpenEraser;
         state.isSpenEraserActive = false;
         state.toolBeforeSpenEraser = null;
         state.canvas.classList.remove('cursor-eraser');
+        // Восстанавливаем правильный курсор для инструмента, который был до S-Pen ластика
+        updateCursor(state, null);
+
+        // --- ИЗМЕНЕНИЕ: Скрываем DOM курсор ---
+        hideEraserCursor();
+        // -------------------------------------
+
         updateToolbarCallback();
 
         return true;
@@ -122,12 +207,41 @@ function checkAndHandleSpenEraser(state, e, callbacks) {
 }
 
 export function startDrawing(state, callbacks, hideContextMenu, e) {
+
     if (state.hoverCheckTimer) {
         clearTimeout(state.hoverCheckTimer);
         state.hoverCheckTimer = null;
     }
-    if (e.target.id !== 'drawingBoard' || (e.pointerType === 'touch' && state.isMultiTouching)) return;
-    
+    if (e.pointerId !== undefined) {
+        state.activePointers.add(e.pointerId);
+    }
+
+    if (state.isMultiTouching || e.target.id !== 'drawingBoard' || (e.pointerType === 'touch' && state.activePointers.size > 1)) {
+        return;
+    }
+
+    // Guard: don't start any canvas actions while the text editor is active.
+    // The text editor's onOutsidePressHandler (capture phase) should consume
+    // outside clicks, but this serves as a safety net against race conditions.
+    if (state.isEditingText || textTool.isActivelyEditing()) {
+        return;
+    }
+
+    // Save selection state before touch interaction so we can restore it if a zoom gesture cancels
+    if (e.pointerType === 'touch') {
+        state._preTouchSelectedLayers = [...state.selectedLayers];
+    }
+
+    // --- ANDROID FIX: Захватываем указатель, чтобы не терять события pointermove/pointerup ---
+    try {
+        if (e.pointerId !== undefined && e.target.hasPointerCapture && !e.target.hasPointerCapture(e.pointerId)) {
+            e.target.setPointerCapture(e.pointerId);
+        }
+    } catch (err) {
+        console.warn('Pointer capture failed:', err);
+    }
+    // -----------------------------------------------------------------------------------------
+
     if (state.hideCreationTooltip) {
         state.hideCreationTooltip();
     }
@@ -144,79 +258,256 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
         document.addEventListener('pointerup', state.onPointerUp);
         return;
     }
-    
+
     const pos = utils.getMousePos(e, state);
+    
+    // Resolve if drawing is inside a sticker card
+    let activeDrawingSticker = null;
+    if (state.editingAnnotationsLayerId) {
+        activeDrawingSticker = window.stickerApp.stickers.find(s => s.id === state.editingAnnotationsLayerId);
+    } else if (window.stickerApp && window.stickerApp.stickers) {
+        for (let i = window.stickerApp.stickers.length - 1; i >= 0; i--) {
+            const s = window.stickerApp.stickers[i];
+            if (pos.x >= s.x && pos.x <= s.x + s.w &&
+                pos.y >= s.y && pos.y <= s.y + s.h) {
+                activeDrawingSticker = s;
+                break;
+            }
+        }
+    }
+    state.activeDrawingSticker = activeDrawingSticker;
+
     state.dragStartPos = pos;
+
+    // --- Ghost Navigation Buttons Check ---
+    for (let i = state.layers.length - 1; i >= 0; i--) {
+        const layer = state.layers[i];
+        if (layer.type === 'pdf' && layer.numPages > 1 && !state.layersToErase.has(layer)) {
+            let testPos = pos;
+            if (layer.rotation) {
+                const center = { x: layer.x + layer.width / 2, y: layer.y + layer.height / 2 };
+                const pivot = layer.pivot || { x: 0, y: 0 };
+                const pivotX = center.x + pivot.x;
+                const pivotY = center.y + pivot.y;
+                testPos = geo.rotatePoint(pos, { x: pivotX, y: pivotY }, -layer.rotation);
+            }
+
+            const z = state.zoom;
+            const btnSize = 24 / z;
+            const padding = 6 / z;
+            
+            const rightX = layer.x + layer.width - btnSize - padding;
+            const leftX = rightX - btnSize - padding;
+            const btnY = layer.y + layer.height - btnSize - padding;
+            
+            const hitPad = 4 / z;
+            
+            if (testPos.y >= btnY - hitPad && testPos.y <= btnY + btnSize + hitPad) {
+                const navigatePage = async (newPage) => {
+                    if (!layer.renderedPages.has(newPage)) {
+                        await utils.renderPdfPageToCanvas(layer, newPage);
+                    }
+                    layer.currentPage = newPage;
+                    if (state.tileManager) state.tileManager.invalidateLayer(layer, state);
+                    redrawCallback();
+                    state.updateFloatingToolbar();
+                };
+                if (testPos.x >= rightX - hitPad && testPos.x <= rightX + btnSize + hitPad) {
+                    if (layer.currentPage < layer.numPages) {
+                        navigatePage(layer.currentPage + 1);
+                    }
+                    return;
+                }
+                if (testPos.x >= leftX - hitPad && testPos.x <= leftX + btnSize + hitPad) {
+                    if (layer.currentPage > 1) {
+                        navigatePage(layer.currentPage - 1);
+                    }
+                    return;
+                }
+            }
+        }
+    }
+    // --------------------------------------
+
+    // --- Track click count globally (needed for double-click detection on rulers etc.) ---
+    {
+        const now = Date.now();
+        const CLICK_SPEED = 500, CLICK_RADIUS = 20;
+        const timeDiff = now - (state.lastClickTime || 0);
+        if (state.lastClickPos && timeDiff < CLICK_SPEED && Math.abs(pos.x - state.lastClickPos.x) < CLICK_RADIUS && Math.abs(pos.y - state.lastClickPos.y) < CLICK_RADIUS) {
+            state.clickCount = (state.clickCount || 0) + 1;
+        } else {
+            state.clickCount = 1;
+        }
+        state.lastClickTime = now;
+        state.lastClickPos = pos;
+    }
+    // ----------------------------------------------------------------------------------
+
+    // --- Ruler Hit Test ---
+    if (state.rulers && state.rulers.length > 0 && !state.isDrawing && state.activeTool !== 'eraser' && state.activeTool !== 'laser' && e.button !== 1) {
+        const hitPart = hitTest.getHitRulerPart(pos, state.rulers, state.zoom);
+        if (hitPart) {
+            if (hitPart.part === 'delete') {
+                state.rulers = state.rulers.filter(r => r.id !== hitPart.ruler.id);
+                if (state.saveViewState) state.saveViewState();
+                redrawCallback();
+                return;
+            }
+            if (hitPart.part === 'settings') {
+                e.stopPropagation();
+                showRulerSettings(hitPart.ruler, e.clientX, e.clientY, state, redrawCallback);
+                redrawCallback();
+                return;
+            }
+
+            // --- Double-click on pivot resets it to default ---
+            if (hitPart.part === 'pivot' && state.clickCount === 2) {
+                hitPart.ruler.pivotOffset = 0;
+                hitPart.ruler.pivotOffsetY = 0;
+                if (state.saveViewState) state.saveViewState();
+                redrawCallback();
+                return;
+            }
+            // --------------------------------------------------
+            
+            state.activeRuler = hitPart.ruler;
+            state.rulerAction = hitPart.part; 
+            state.rulerStartPos = pos;
+            
+            const cos = Math.cos(hitPart.ruler.angle);
+            const sin = Math.sin(hitPart.ruler.angle);
+            const pivotOffset = hitPart.ruler.pivotOffset || 0;
+            const pivotOffsetY = hitPart.ruler.pivotOffsetY || 0;
+            const pWorldX = hitPart.ruler.x + pivotOffset * cos - pivotOffsetY * sin;
+            const pWorldY = hitPart.ruler.y + pivotOffset * sin + pivotOffsetY * cos;
+            state.rulerStartAngleOffset = hitPart.ruler.angle - Math.atan2(pos.y - pWorldY, pos.x - pWorldX);
+            
+            // Bring ruler to front
+            state.rulers = state.rulers.filter(r => r.id !== hitPart.ruler.id);
+            state.rulers.push(state.activeRuler);
+
+            document.addEventListener('pointermove', state.onPointerMove);
+            document.addEventListener('pointerup', state.onPointerUp);
+            return;
+        }
+    }
+    // --------------------------------------
 
     const isPanToolActive = state.activeTool === 'pan' && e.button === 0;
     const isMiddleMouseButton = e.pointerType === 'mouse' && e.button === 1;
 
     if (isPanToolActive || isMiddleMouseButton) {
         state.isPanning = true;
-        state.panStartPos = { x: e.clientX, y: e.clientY };
-        state.initialPan = { x: state.panX, y: state.panY };
-        state.canvas.style.cursor = 'grabbing';
+        state.lastPanPos = { x: e.clientX, y: e.clientY };
+        // Don't override cursor when laser is active — keep it hidden
+        if (state.activeTool !== 'laser') {
+            state.canvas.style.cursor = getHandGrabbingCursor();
+        }
 
-        // --- НАЧАЛО ИЗМЕНЕНИЙ: Правильное кеширование для панорамирования ---
-        // Создаем пиксельный "снимок" текущего состояния основного холста.
-        // Это самый быстрый и надежный способ избежать проблем с обрезкой.
-        const { cacheCtx, cacheCanvas, canvas } = state;
-        cacheCtx.clearRect(0, 0, cacheCanvas.width, cacheCanvas.height);
-        cacheCtx.drawImage(canvas, 0, 0);
-        // --- КОНЕЦ ИЗМЕНЕНИЙ ---
-        
         document.addEventListener('pointermove', state.onPointerMove);
         document.addEventListener('pointerup', state.onPointerUp);
         return;
     }
-    
+
     if (e.pointerType === 'mouse' && e.button !== 0) return;
-    
+
     hideContextMenu();
-    
+
+    state.iCtx.setTransform(1, 0, 0, 1, 0, 0);
+    state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
+
     if (state.activeTool === 'select') {
         document.addEventListener('pointermove', state.onPointerMove);
         document.addEventListener('pointerup', state.onPointerUp);
-        
-        const now = Date.now();
-        const CLICK_SPEED = 500, CLICK_RADIUS = 20;
-        const timeDiff = now - state.lastClickTime;
-        if (state.lastClickPos && timeDiff < CLICK_SPEED && Math.abs(pos.x - state.lastClickPos.x) < CLICK_RADIUS && Math.abs(pos.y - state.lastClickPos.y) < CLICK_RADIUS) { state.clickCount++; } else { state.clickCount = 1; }
-        state.lastClickTime = now; state.lastClickPos = pos;
-        
+
+        // clickCount is already tracked by the global counter above — no double-counting here
+
         if (state.clickCount === 2 && e.button === 0) {
-            const clickedLayer = hitTest.getLayerAtPosition(pos, state.layers, state.zoom, state.spatialGrid);
+            let clickedLayer = hitTest.getLayerAtPosition(pos, state.layers, state.zoom, state.spatialGrid);
+            if (clickedLayer && clickedLayer.parentId) {
+                const parentSticker = state.layers.find(l => l.id === clickedLayer.parentId && l.type === 'sticker');
+                if (parentSticker) {
+                    if (state.editingAnnotationsLayerId !== parentSticker.id) {
+                        if (window.stickerApp) {
+                            const stickerObj = window.stickerApp.stickers.find(s => s.id === parentSticker.id);
+                            if (stickerObj) {
+                                window.stickerApp.selectSticker(stickerObj);
+                                if (stickerObj.contentElement) {
+                                    stickerObj.contentElement.contentEditable = true;
+                                    stickerObj.isEditing = true;
+                                    stickerObj.contentElement.focus();
+                                }
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+            if (state.editingAnnotationsLayerId && clickedLayer) {
+                const parentLayer = state.layers.find(l => l.id === state.editingAnnotationsLayerId);
+                const isChild = clickedLayer.parentId === state.editingAnnotationsLayerId;
+                const isSamePage = parentLayer && parentLayer.type === 'pdf' ? clickedLayer.parentPage === parentLayer.currentPage : true;
+                if (!isChild || !isSamePage) {
+                    clickedLayer = null;
+                }
+            }
             if (clickedLayer && clickedLayer.type === 'text') {
                 state.selectedLayers = [clickedLayer];
+
                 clickedLayer.isEditing = true;
                 state.isEditingText = true;
-                redrawCallback();
-                state.updateFloatingToolbar();
+                if (state.tileManager) state.tileManager.invalidateLayer(clickedLayer, state);
+                // Блокируем следующий click, чтобы холст не забрал фокус у текстового редактора
+                const blockClick = (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    window.removeEventListener('click', blockClick, true);
+                };
+                window.addEventListener('click', blockClick, true);
+                setTimeout(() => window.removeEventListener('click', blockClick, true), 200);
+
+                // Критически важно: освобождаем захват указателя ДО установки фокуса
+                try {
+                    if (e && e.pointerId !== undefined && e.target && e.target.hasPointerCapture && e.target.hasPointerCapture(e.pointerId)) {
+                        e.target.releasePointerCapture(e.pointerId);
+                    }
+                } catch (err) { }
+
                 textTool.startEditing(state, clickedLayer, (isIntermediate, before, after) => {
-                    if (isIntermediate) { redrawCallback(); state.updateFloatingToolbar(); if(state.updateTextEditorTransform) state.updateTextEditorTransform(clickedLayer, state); return; }
-                    
+                    if (isIntermediate) { redrawCallback(); state.updateFloatingToolbar(); if (state.syncTextEditorWithCanvas) state.syncTextEditorWithCanvas(state); return; }
+
                     state.isEditingText = false;
                     const finishedLayer = state.layers.find(l => l.id === clickedLayer.id);
-                    if (finishedLayer) { finishedLayer.isEditing = false; }
+                    if (finishedLayer) {
+                        finishedLayer.isEditing = false;
+                        if (state.tileManager) state.tileManager.invalidateLayer(finishedLayer, state);
+                    }
 
                     if (before && after) {
                         saveState({ type: 'update', before, after });
                     }
-                    
+
                     redrawCallback();
                     state.updateFloatingToolbar();
                 });
+                redrawCallback();
                 return;
             } else if (clickedLayer && clickedLayer.type === 'curve') {
                 e.preventDefault();
                 const closest = geo.findClosestPointOnCurveSegment(pos, clickedLayer);
                 if (closest && closest.distance < (10 / state.zoom)) {
                     const before = utils.cloneLayersForAction([clickedLayer]);
+                    if (state.tileManager) state.tileManager.invalidateLayer(clickedLayer, state);
+
                     const [p0, p1, p2, p3] = [clickedLayer.nodes[closest.segmentIndex].p, clickedLayer.nodes[closest.segmentIndex].h1, clickedLayer.nodes[closest.segmentIndex + 1].h2, clickedLayer.nodes[closest.segmentIndex + 1].p];
                     const newNodeP = geo.getPointOnBezier(closest.t, p0, p1, p2, p3);
                     const newNode = { p: newNodeP, h1: null, h2: null, type: 'smooth' };
                     clickedLayer.nodes.splice(closest.segmentIndex + 1, 0, newNode);
                     utils.smoothCurveHandles(clickedLayer.nodes);
+
+                    if (state.tileManager) state.tileManager.invalidateLayer(clickedLayer, state);
+
                     const after = utils.cloneLayersForAction([clickedLayer]);
                     saveState({ type: 'update', before, after });
                     redrawCallback();
@@ -224,19 +515,23 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
                 return;
             }
         }
-        
+
         state.groupRotation = 0;
-        const handle = hitTest.getHandleAtPosition(pos, state.selectedLayers, state.zoom, state.groupRotation);
+        let handle = hitTest.getHandleAtPosition(pos, state.selectedLayers, state.zoom, state.groupRotation);
+
+        if (state.editingAnnotationsLayerId && state.selectedLayers.length === 1 && state.selectedLayers[0].id === state.editingAnnotationsLayerId) {
+            handle = null;
+        }
 
         if (handle) {
-            document.querySelectorAll('.floating-toolbar').forEach(tb => tb.classList.remove('visible'));
+            document.querySelectorAll('.floating-toolbar:not(#floating-ruler-toolbar)').forEach(tb => tb.classList.remove('visible'));
             state.scalingHandle = handle;
             if (typeof handle === 'object' && (handle.type === 'curveNode' || handle.type === 'curveHandle')) {
                 if (handle.type === 'curveNode' && state.selectedCurveNodeIndex !== handle.nodeIndex) { state.selectedCurveNodeIndex = handle.nodeIndex; }
                 else if (handle.type === 'curveHandle') { state.selectedCurveNodeIndex = null; }
                 state.currentAction = 'editingCurve';
                 state.originalLayers = utils.cloneLayersForAction(state.selectedLayers);
-            } else if (handle === 'pivot') { 
+            } else if (handle === 'pivot') {
                 state.currentAction = 'movingPivot';
                 state.canvas.style.cursor = 'none';
                 state.originalLayers = utils.cloneLayersForAction(state.selectedLayers);
@@ -254,10 +549,15 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
                 state.rotationStartAngle = Math.atan2(pos.y - state.groupPivot.y, pos.x - state.groupPivot.x);
                 state.originalLayers = utils.cloneLayersForAction(state.selectedLayers);
             } else {
-                state.currentAction = 'scaling'; 
-                state.originalBox = geo.getGroupLogicalBoundingBox(state.selectedLayers); 
+                state.currentAction = 'scaling';
+                state.originalBox = geo.getGroupLogicalBoundingBox(state.selectedLayers);
                 state.originalLayers = utils.cloneLayersForAction(state.selectedLayers);
             }
+
+            if (state.tileManager) {
+                state.selectedLayers.forEach(layer => state.tileManager.invalidateLayer(layer, state));
+            }
+
             prepareInteractionCache(state);
             return;
         }
@@ -266,21 +566,60 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
             const selectionBox = geo.getGroupBoundingBox(state.selectedLayers);
             if (selectionBox) {
                 const rotation = hitTest.getSelectionRotation(state.selectedLayers, state.groupRotation);
-                const center = { x: selectionBox.x + selectionBox.width/2, y: selectionBox.y + selectionBox.height/2 };
+                const center = { x: selectionBox.x + selectionBox.width / 2, y: selectionBox.y + selectionBox.height / 2 };
                 const rotatedPos = geo.rotatePoint(pos, center, -rotation);
                 const logicalBox = geo.getGroupLogicalBoundingBox(state.selectedLayers);
 
                 if (geo.isPointInRect(rotatedPos, logicalBox)) {
-                    document.querySelectorAll('.floating-toolbar').forEach(tb => tb.classList.remove('visible'));
+                    document.querySelectorAll('.floating-toolbar:not(#floating-ruler-toolbar)').forEach(tb => tb.classList.remove('visible'));
+                    
+                    if (state.editingAnnotationsLayerId && state.selectedLayers.length === 1 && state.selectedLayers[0].id === state.editingAnnotationsLayerId) {
+                        state.currentAction = 'selectionBox';
+                        state.startPos = pos;
+                        redrawCallback();
+                        updateToolbarCallback();
+                        state.updateFloatingToolbar();
+                        return;
+                    }
+
                     state.currentAction = 'moving';
+                    state.canvas.style.cursor = getHandCursor();
                     state.originalLayers = utils.cloneLayersForAction(state.selectedLayers);
+
+                    if (state.tileManager) {
+                        state.selectedLayers.forEach(layer => state.tileManager.invalidateLayer(layer, state));
+                    }
+
                     prepareInteractionCache(state);
                     return;
                 }
             }
         }
 
-        const clickedLayer = hitTest.getLayerAtPosition(pos, state.layers, state.zoom, state.spatialGrid);
+        let clickedLayer = hitTest.getLayerAtPosition(pos, state.layers, state.zoom, state.spatialGrid);
+        if (clickedLayer && clickedLayer.parentId) {
+            const parentSticker = state.layers.find(l => l.id === clickedLayer.parentId && l.type === 'sticker');
+            if (parentSticker) {
+                if (state.editingAnnotationsLayerId !== parentSticker.id) {
+                    if (window.stickerApp) {
+                        const stickerObj = window.stickerApp.stickers.find(s => s.id === parentSticker.id);
+                        if (stickerObj) {
+                            window.stickerApp.selectSticker(stickerObj);
+                            window.stickerApp.startDrag(stickerObj, e);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+        if (state.editingAnnotationsLayerId && clickedLayer) {
+            const parentLayer = state.layers.find(l => l.id === state.editingAnnotationsLayerId);
+            const isChild = clickedLayer.parentId === state.editingAnnotationsLayerId;
+            const isSamePage = parentLayer && parentLayer.type === 'pdf' ? clickedLayer.parentPage === parentLayer.currentPage : true;
+            if (!isChild || !isSamePage) {
+                clickedLayer = null;
+            }
+        }
         if (clickedLayer) {
             const isAlreadySelected = state.selectedLayers.some(l => l.id === clickedLayer.id);
             if (e.shiftKey) {
@@ -290,21 +629,21 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
                     state.selectedLayers.push(clickedLayer);
                 }
                 state.selectedCurveNodeIndex = null;
-                
+
                 if (state.selectedLayers.length > 1) {
-                    // Проверяем, нужно ли сбрасывать pivot/rotation у каких-либо слоев в группе
                     const needsReset = state.selectedLayers.some(l => (l.rotation && l.rotation !== 0) || (l.pivot && (l.pivot.x !== 0 || l.pivot.y !== 0)));
-            
+
                     if (needsReset) {
+                        if (state.tileManager) state.selectedLayers.forEach(l => state.tileManager.invalidateLayer(l, state));
+
                         const before = utils.cloneLayersForAction(state.selectedLayers);
-                        
-                        // "Запекаем" трансформации и сбрасываем pivot/rotation
                         state.selectedLayers.forEach(layer => {
                             utils.applyTransformations(layer);
                         });
-            
                         const after = utils.cloneLayersForAction(state.selectedLayers);
-                        
+
+                        if (state.tileManager) state.selectedLayers.forEach(l => state.tileManager.invalidateLayer(l, state));
+
                         saveState({
                             type: 'update',
                             before: before,
@@ -318,38 +657,46 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
                     state.selectedLayers = [clickedLayer];
                     state.selectedCurveNodeIndex = null;
                 }
-                document.querySelectorAll('.floating-toolbar').forEach(tb => tb.classList.remove('visible'));
-                state.currentAction = 'moving';
-                state.originalLayers = utils.cloneLayersForAction(state.selectedLayers);
-                prepareInteractionCache(state);
+                document.querySelectorAll('.floating-toolbar:not(#floating-ruler-toolbar)').forEach(tb => tb.classList.remove('visible'));
+                
+                if (state.editingAnnotationsLayerId && clickedLayer.id === state.editingAnnotationsLayerId) {
+                    state.currentAction = 'selectionBox';
+                    state.startPos = pos;
+                } else {
+                    state.currentAction = 'moving';
+                    state.canvas.style.cursor = getHandCursor();
+                    state.originalLayers = utils.cloneLayersForAction(state.selectedLayers);
+
+                    if (state.tileManager) {
+                        state.selectedLayers.forEach(layer => state.tileManager.invalidateLayer(layer, state));
+                    }
+
+                    prepareInteractionCache(state);
+                }
             }
-            redrawCallback(); 
+            redrawCallback();
             updateToolbarCallback();
             state.updateFloatingToolbar();
         } else {
             if (!e.shiftKey && !e.ctrlKey && !e.metaKey) {
-                if (state.selectedLayers.length > 0) {
-                    // This deselection doesn't need to be in history.
-                    // Transformations are saved at the end of the action.
-                }
                 state.selectedLayers = [];
                 state.selectedCurveNodeIndex = null;
             }
             state.currentAction = 'selectionBox';
             state.startPos = pos;
-            redrawCallback(); 
+            redrawCallback();
             updateToolbarCallback();
             state.updateFloatingToolbar();
         }
     } else {
         document.addEventListener('pointermove', state.onPointerMove);
         document.addEventListener('pointerup', state.onPointerUp);
-        
-        state.selectedLayers = []; 
+
+        state.selectedLayers = [];
         state.selectedCurveNodeIndex = null;
         updateToolbarCallback();
         state.updateFloatingToolbar();
-        state.isDrawing = true; 
+        state.isDrawing = true;
 
         let finalPos = pos;
         const isSnappingTool = !['brush', 'smart-brush', 'curve'].includes(state.activeTool);
@@ -361,12 +708,18 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
             finalPos.x = (Math.abs(snappedX - pos.x) < SNAP_THRESHOLD) ? snappedX : pos.x;
             finalPos.y = (Math.abs(snappedY - pos.y) < SNAP_THRESHOLD) ? snappedY : pos.y;
         }
+
+        if (state.snapToRuler) {
+            finalPos = utils.snapToRulers(finalPos, state.rulers, state.zoom);
+        }
+        
         state.startPos = finalPos;
 
         if (state.activeTool === 'curve') {
             if (!state.tempLayer || state.tempLayer.type !== 'curve') {
                 state.currentAction = 'drawingCurve';
                 state.tempLayer = { type: 'curve', nodes: [], color: state.activeColor, lineWidth: state.activeLineWidth, id: Date.now(), rotation: 0, pivot: { x: 0, y: 0 }, lineStyle: state.activeLineStyle };
+                assignParentToTempLayer(state);
                 const newNode = { p: { ...finalPos }, h1: { ...finalPos }, h2: { ...finalPos }, type: 'smooth' };
                 state.tempLayer.nodes.push(newNode);
             } else {
@@ -375,57 +728,124 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
                 const newNode = { p: { ...finalPos }, h1: { ...finalPos }, h2: reflectedH1, type: 'smooth' };
                 state.tempLayer.nodes.push(newNode);
             }
-    
+
             if (state.tempLayer.nodes.length === 3) {
-                utils.smoothCurveHandles(state.tempLayer.nodes); 
+                utils.smoothCurveHandles(state.tempLayer.nodes);
                 const newLayer = utils.cloneLayersForAction([state.tempLayer])[0];
+                delete newLayer.isEditing;
                 state.layers.push(newLayer);
+
+                if (state.tileManager) state.tileManager.invalidateLayer(newLayer, state);
+
+                // Add to spatial grid so tileManager can find the layer
+                if (state.spatialGrid) {
+                    const box = geo.getTransformedBoundingBox(newLayer);
+                    if (box) {
+                        const startCol = Math.floor(box.x / 500);
+                        const endCol = Math.floor((box.x + box.width) / 500);
+                        const startRow = Math.floor(box.y / 500);
+                        const endRow = Math.floor((box.y + box.height) / 500);
+                        for (let r = startRow; r <= endRow; r++) {
+                            for (let c = startCol; c <= endCol; c++) {
+                                const cellKey = `${c}_${r}`;
+                                if (!state.spatialGrid.has(cellKey)) state.spatialGrid.set(cellKey, []);
+                                state.spatialGrid.get(cellKey).push(newLayer);
+                            }
+                        }
+                    }
+                }
+
                 saveState({ type: 'creation', before: [], after: [newLayer] });
                 state.selectedLayers = [newLayer];
                 state.currentAction = 'none';
                 state.tempLayer = null;
                 state.isDrawing = false;
                 document.querySelector('button[data-tool="select"]')?.click();
+                state.iCtx.setTransform(1, 0, 0, 1, 0, 0);
                 state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
                 redrawCallback();
                 document.removeEventListener('pointermove', state.onPointerMove);
                 document.removeEventListener('pointerup', state.onPointerUp);
             } else {
+                state.iCtx.setTransform(1, 0, 0, 1, 0, 0);
                 state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
                 tools.handleShapeDrawing(state.iCtx, state, finalPos, e);
             }
             return;
         }
-        
+
         if (state.activeTool === 'text' && !state.isEditingText && e.button === 0) {
-            const clickedLayer = hitTest.getLayerAtPosition(pos, state.layers, state.zoom, state.spatialGrid);
+            let clickedLayer = hitTest.getLayerAtPosition(pos, state.layers, state.zoom, state.spatialGrid);
+            if (state.editingAnnotationsLayerId && clickedLayer) {
+                const parentLayer = state.layers.find(l => l.id === state.editingAnnotationsLayerId);
+                const isChild = clickedLayer.parentId === state.editingAnnotationsLayerId;
+                const isSamePage = parentLayer && parentLayer.type === 'pdf' ? clickedLayer.parentPage === parentLayer.currentPage : true;
+                if (!isChild || !isSamePage) {
+                    clickedLayer = null;
+                }
+            }
             if (clickedLayer && clickedLayer.type === 'text') {
                 state.selectedLayers = [clickedLayer];
+
                 clickedLayer.isEditing = true;
                 state.isEditingText = true;
-                redrawCallback();
-                state.updateFloatingToolbar();
+                state.isDrawing = false; // Сбрасываем флаг, чтобы тайл перерендерился синхронно без текста
+                if (state.tileManager) state.tileManager.invalidateLayer(clickedLayer, state);
+                
+                // ИЗМЕНЕНИЕ: Переключаем инструмент на "Выделение", чтобы при клике мимо не создавалась новая рамка
+                const selectButton = document.querySelector('button[data-tool="select"]');
+                if (selectButton) { 
+                    state.activeTool = 'select';
+                    document.querySelectorAll('.toolbar button').forEach(btn => btn.classList.remove('active'));
+                    selectButton.classList.add('active');
+                    state.canvas.style.cursor = 'default';
+                    state.canvas.classList.remove('cursor-brush', 'cursor-eraser');
+                    if (callbacks.updateToolbarCallback) callbacks.updateToolbarCallback();
+                }
+
+                // Блокируем следующий click, чтобы холст не забрал фокус у текстового редактора
+                const blockClick = (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    window.removeEventListener('click', blockClick, true);
+                };
+                window.addEventListener('click', blockClick, true);
+                setTimeout(() => window.removeEventListener('click', blockClick, true), 200);
+
+                // Критически важно: освобождаем захват указателя ДО установки фокуса
+                try {
+                    if (e && e.pointerId !== undefined && e.target && e.target.hasPointerCapture && e.target.hasPointerCapture(e.pointerId)) {
+                        e.target.releasePointerCapture(e.pointerId);
+                    }
+                } catch (err) { }
+
                 textTool.startEditing(state, clickedLayer, (isIntermediate, before, after) => {
-                    if (isIntermediate) { redrawCallback(); state.updateFloatingToolbar(); if (state.updateTextEditorTransform) state.updateTextEditorTransform(clickedLayer, state); return; }
+                    if (isIntermediate) { redrawCallback(); state.updateFloatingToolbar(); if (state.syncTextEditorWithCanvas) state.syncTextEditorWithCanvas(state); return; }
                     state.isEditingText = false;
                     const finishedLayer = state.layers.find(l => l.id === clickedLayer.id);
-                    if (finishedLayer) { finishedLayer.isEditing = false; }
+                    if (finishedLayer) {
+                        finishedLayer.isEditing = false;
+                        if (state.tileManager) state.tileManager.invalidateLayer(finishedLayer, state);
+                    }
                     if (before && after) {
                         saveState({ type: 'update', before, after });
                     }
                     redrawCallback();
                     state.updateFloatingToolbar();
                 });
-                return;
-            }
+
+                redrawCallback();
+                return;            }
         }
-        
+
         clearTimeout(state.shapeRecognitionTimer);
         state.shapeWasJustRecognized = false;
         state.layersToErase.clear();
 
         if (state.activeTool === 'brush' || state.activeTool === 'smart-brush') {
             state.tempLayer = { type: 'path', points: [], hasPressure: e.pointerType === 'pen', color: state.activeColor, lineWidth: state.activeLineWidth, id: Date.now(), rotation: 0, pivot: { x: 0, y: 0 }, lineStyle: state.activeLineStyle };
+            assignParentToTempLayer(state);
+
             const point = [finalPos.x, finalPos.y];
             if (state.tempLayer.hasPressure) {
                 const rawPressure = e.pressure > 0 ? e.pressure : 0.5;
@@ -434,109 +854,263 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
             }
             state.tempLayer.points.push(...point);
             state.lastBrushPoint = finalPos;
+            // Smart-brush: track when the pointer last moved significantly
+            state.lastSignificantMoveTime = Date.now();
+            state.lastSignificantMovePos = { x: finalPos.x, y: finalPos.y };
+
         } else if (state.activeTool === 'eraser') {
             state.isDrawing = true;
             state.didErase = false;
-            
-            if (!document.body.classList.contains('no-animations')) {
-                state.lastEraserPos = finalPos;
-                state.eraserTrailNodes = Array(10).fill(null).map(() => ({ ...finalPos }));
-                if (state.eraserAnimationId) { cancelAnimationFrame(state.eraserAnimationId); }
-                animateEraserTrail(state);
+
+            // --- ИЗМЕНЕНИЕ: Включаем DOM-курсор ---
+            updateEraserCursor(e.clientX, e.clientY, state.zoom, true, state.activeEraserWidth);
+            // --------------------------------------
+        } else if (state.activeTool === 'laser') {
+            state.isDrawing = true;
+            state.laserPoints = [];
+            state.laserPoints.push({ x: finalPos.x, y: finalPos.y, time: Date.now() });
+            state.laserPointerPos = { x: finalPos.x, y: finalPos.y };
+            if (state.startLaserPointerLoop) {
+                state.startLaserPointerLoop();
             }
+        }
+        
+        // ВАЖНО: Моментально отрисовываем фигуру или её превью, чтобы избежать мерцания в момент длинного клика/касания
+        const isShapeTool = !['brush', 'smart-brush', 'eraser', 'select', 'pan', 'text', 'curve'].includes(state.activeTool);
+        if ((state.isDrawing && isShapeTool) || state.currentAction.startsWith('drawing')) {
+            tools.handleShapeDrawing(state.iCtx, state, finalPos, e);
         }
     }
 }
 
 export function draw(state, callbacks, e) {
+
+    // Одно и то же pointermove приходит дважды: от слушателя на canvas и от
+    // document (событие всплывает). Обрабатываем его только один раз.
+    if (state._lastHandledPointerEvent === e) return;
+    state._lastHandledPointerEvent = e;
+
+    if (state.activePointers.size > 1 && e.pointerType === 'touch') return;
     if (state.isMultiTouching) return;
 
+    // Запоминаем последнюю экранную позицию курсора: она нужна, чтобы
+    // завершить кривую по Enter именно там, куда показывала направляющая.
+    if (e && typeof e.clientX === 'number' && typeof e.clientY === 'number') {
+        state.lastPointerClientPos = { x: e.clientX, y: e.clientY };
+    }
+
     const { redrawCallback, saveViewStateCallback, drawBackgroundCallback } = callbacks;
+    const dpr = window.devicePixelRatio || 1;
 
-    if (state.isPanning) { 
-        const dx = e.clientX - state.panStartPos.x; 
-        const dy = e.clientY - state.panStartPos.y; 
-        
-        // --- НАЧАЛО ИЗМЕНЕНИЙ: Правильная отрисовка во время панорамирования ---
-        // Обновляем `panX` и `panY` временно, чтобы фон (сетка) отрисовался в правильном месте.
-        state.panX = state.initialPan.x + dx;
-        state.panY = state.initialPan.y + dy;
+    if (state.isPanning) {
+        if (!state.lastPanPos) state.lastPanPos = { x: e.clientX, y: e.clientY };
+        const dx = e.clientX - state.lastPanPos.x;
+        const dy = e.clientY - state.lastPanPos.y;
 
-        // Перерисовываем фон с новым смещением.
-        if (drawBackgroundCallback) {
-            drawBackgroundCallback();
-        }
+        state.panX += dx;
+        state.panY += dy;
         
-        // Очищаем основной холст и рисуем на нем сдвинутый "снимок" из кеша.
-        // Это быстрая операция, которая не вызывает "обрезку".
-        state.ctx.clearRect(0, 0, state.canvas.width, state.canvas.height);
-        state.ctx.drawImage(state.cacheCanvas, dx, dy);
-        // --- КОНЕЦ ИЗМЕНЕНИЙ ---
-        
-        state.updateFloatingToolbar(); 
+        state.lastPanPos.x = e.clientX;
+        state.lastPanPos.y = e.clientY;
+
+        // Фон перерисовывается внутри redrawCallback (main.js: redraw -> drawBackground),
+        // поэтому отдельный вызов здесь давал двойную отрисовку на каждый ход панорамы.
+        redrawCallback();
+
+        state.updateFloatingToolbar();
         if (saveViewStateCallback) {
             saveViewStateCallback();
         }
-        return; 
+        return;
     }
-    
+
+    if (state.activeTool === 'laser') {
+        const pos = utils.getMousePos(e, state);
+        state.laserPointerPos = pos;
+        if (state.isDrawing) {
+            if (!state.laserPoints) state.laserPoints = [];
+            state.laserPoints.push({ x: pos.x, y: pos.y, time: Date.now() });
+        }
+        if (state.startLaserPointerLoop) {
+            state.startLaserPointerLoop();
+        }
+        return;
+    }
+
+    if (state.activeRuler) {
+        const pos = utils.getMousePos(e, state);
+        if (state.rulerAction === 'body') {
+            const dx = pos.x - state.rulerStartPos.x;
+            const dy = pos.y - state.rulerStartPos.y;
+            state.activeRuler.x += dx;
+            state.activeRuler.y += dy;
+            state.rulerStartPos = pos;
+            state.canvas.style.cursor = getHandCursor();
+        } else if (state.rulerAction === 'pivot') {
+            const dx = pos.x - state.rulerStartPos.x;
+            const dy = pos.y - state.rulerStartPos.y;
+            
+            // Convert world movement into local horizontal and vertical movement
+            const cos = Math.cos(-state.activeRuler.angle);
+            const sin = Math.sin(-state.activeRuler.angle);
+            const localDx = dx * cos - dy * sin;
+            const localDy = dx * sin + dy * cos;
+            
+            let newOffset = (state.activeRuler.pivotOffset || 0) + localDx;
+            let newOffsetY = (state.activeRuler.pivotOffsetY || 0) + localDy;
+            
+            if (state.activeRuler.type === 'protractor') {
+                const radius = state.activeRuler.radius || 200;
+                const scaleFactor = 1 / state.zoom;
+                const baseH = 45;
+                
+                if (newOffset < -radius) newOffset = -radius;
+                if (newOffset > radius) newOffset = radius;
+                if (newOffsetY < -radius) newOffsetY = -radius;
+                if (newOffsetY > baseH) newOffsetY = baseH;
+
+                if (newOffsetY < 0) {
+                    const dist = Math.hypot(newOffset, newOffsetY);
+                    if (dist > radius) {
+                        newOffset = (newOffset / dist) * radius;
+                        newOffsetY = (newOffsetY / dist) * radius;
+                    }
+                }
+            } else {
+                const halfL = state.activeRuler.length / 2;
+                const halfW = state.activeRuler.width / 2;
+                
+                // clamp pivot to body
+                if (newOffset < -halfL) newOffset = -halfL;
+                if (newOffset > halfL) newOffset = halfL;
+                if (newOffsetY < -halfW) newOffsetY = -halfW;
+                if (newOffsetY > halfW) newOffsetY = halfW;
+            }
+            
+            state.activeRuler.pivotOffset = newOffset;
+            state.activeRuler.pivotOffsetY = newOffsetY;
+            state.rulerStartPos = pos;
+            updateCursor(state, 'pivot');
+        } else if (state.rulerAction === 'rotate') {
+            const cos = Math.cos(state.activeRuler.angle);
+            const sin = Math.sin(state.activeRuler.angle);
+            const pivotOffset = state.activeRuler.pivotOffset || 0;
+            const pivotOffsetY = state.activeRuler.pivotOffsetY || 0;
+            const pWorldX = state.activeRuler.x + pivotOffset * cos - pivotOffsetY * sin;
+            const pWorldY = state.activeRuler.y + pivotOffset * sin + pivotOffsetY * cos;
+
+            const angle = Math.atan2(pos.y - pWorldY, pos.x - pWorldX);
+            let newAngle = angle + state.rulerStartAngleOffset;
+            
+            if (state.activeRuler.snapEnabled || e.shiftKey) { 
+                const snapAngle = (state.activeRuler.snapAngle || 15) * Math.PI / 180;
+                newAngle = Math.round(newAngle / snapAngle) * snapAngle;
+            }
+            state.activeRuler.angle = newAngle;
+
+            // Restore pivot world position
+            const cosNew = Math.cos(newAngle);
+            const sinNew = Math.sin(newAngle);
+            state.activeRuler.x = pWorldX - pivotOffset * cosNew + pivotOffsetY * sinNew;
+            state.activeRuler.y = pWorldY - pivotOffset * sinNew - pivotOffsetY * cosNew;
+            
+            updateCursor(state, 'rotate');
+            syncRulerSettingsAngle();
+        }
+        callbacks.redrawCallback();
+        return;
+    }
+
     if (state.isInteracting) {
         const pos = utils.getMousePos(e, state);
-        
+
+        state.iCtx.setTransform(1, 0, 0, 1, 0, 0);
         state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
+
         state.iCtx.drawImage(state.cacheCanvas, 0, 0);
 
-        switch(state.currentAction) {
+        switch (state.currentAction) {
             case 'editingCurve': actions.handleEditCurve(state, pos, e); break;
             case 'movingPivot': actions.handleMovePivot(state, pos); break;
             case 'rotating': actions.handleRotate(state, pos, e); break;
-            case 'moving': actions.handleMove(state, pos, e); break;
+            case 'moving': 
+                state.canvas.style.cursor = getHandCursor();
+                actions.handleMove(state, pos, e); 
+                break;
             case 'scaling': actions.handleScale(state, pos, e); break;
         }
-        
+
+        if (state.editingAnnotationsLayerId) {
+            const sticker = window.stickerApp.stickers.find(s => s.id === state.editingAnnotationsLayerId);
+            if (sticker) {
+                sticker.renderDrawing();
+            }
+        }
+
         state.iCtx.save();
+        state.iCtx.scale(dpr, dpr);
         state.iCtx.translate(state.panX, state.panY);
         state.iCtx.scale(state.zoom, state.zoom);
 
-        if (state.selectedLayers.length > 1 && state.groupRotation && state.groupPivot) {
-            state.iCtx.save(); 
+        if (state.transformGroup && state.transformGroup.length > 1 && state.groupRotation && state.groupPivot) {
+            state.iCtx.save();
             state.iCtx.translate(state.groupPivot.x, state.groupPivot.y);
             state.iCtx.rotate(state.groupRotation);
             state.iCtx.translate(-state.groupPivot.x, -state.groupPivot.y);
         }
 
-        state.selectedLayers.forEach(layer => {
+        const activeGroup = state.transformGroup || state.selectedLayers;
+        activeGroup.forEach(layer => {
+            if (layer.parentId && !state.selectedLayers.some(l => l.id === layer.id)) {
+                const parent = state.layers.find(p => p.id === layer.parentId);
+                if (parent && parent.type === 'pdf' && parent.currentPage !== layer.parentPage) return;
+            }
             drawLayer(state.iCtx, layer, state);
         });
 
-        if (state.selectedLayers.length > 1 && state.groupRotation && state.groupPivot) {
-            state.iCtx.restore(); 
+        if (state.transformGroup && state.transformGroup.length > 1 && state.groupRotation && state.groupPivot) {
+            state.iCtx.restore();
         }
 
         drawSelectionBox(state.iCtx, state.selectedLayers, state);
-        
         state.iCtx.restore();
-        
-        return; 
+
+        return;
     }
 
     if (state.currentAction === 'drawingCurve') {
         const pos = utils.getMousePos(e, state);
+        state.iCtx.setTransform(1, 0, 0, 1, 0, 0);
         state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
-    
+
         if (state.isDrawing && state.tempLayer) {
             const nodes = state.tempLayer.nodes;
             const currentNode = nodes[nodes.length - 1];
-    
+
             currentNode.h1 = { ...pos };
-            
-            currentNode.h2 = { 
+
+            currentNode.h2 = {
                 x: 2 * currentNode.p.x - pos.x,
                 y: 2 * currentNode.p.y - pos.y
             };
         }
-        
-        tools.handleShapeDrawing(state.iCtx, state, pos, e);
+
+        if (state.activeDrawingSticker) {
+            const sticker = state.activeDrawingSticker;
+            state.iCtx.setTransform(1, 0, 0, 1, 0, 0);
+            state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
+            sticker.renderDrawing();
+            
+            const mockState = {
+                ...state,
+                zoom: state.zoom,
+                panX: -state.zoom * sticker.x,
+                panY: -state.zoom * sticker.y
+            };
+            tools.handleShapeDrawing(sticker.ctx, mockState, pos, e);
+        } else {
+            tools.handleShapeDrawing(state.iCtx, state, pos, e);
+        }
         return;
     }
 
@@ -551,55 +1125,115 @@ export function draw(state, callbacks, e) {
             const textarea = textTool.getEditorTextarea();
             if (textarea) textarea.style.pointerEvents = 'none';
         }
-        
+
         const shouldSnap = (state.snappingMode === 'manual' && e.altKey) || (state.snappingMode === 'auto' && !e.altKey);
         if (!shouldSnap) { state.snapPoint = null; }
 
-        switch(state.currentAction) {
-            case 'selectionBox': 
+        switch (state.currentAction) {
+            case 'selectionBox':
+                state.selectionBox = {
+                    x: state.startPos.x,
+                    y: state.startPos.y,
+                    width: pos.x - state.startPos.x,
+                    height: pos.y - state.startPos.y
+                };
+                if (state.editingAnnotationsLayerId && window.stickerApp) {
+                    const sticker = window.stickerApp.stickers.find(s => s.id === state.editingAnnotationsLayerId);
+                    if (sticker) {
+                        sticker.renderDrawing();
+                    }
+                }
+                state.iCtx.setTransform(1, 0, 0, 1, 0, 0);
                 state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
                 state.iCtx.save();
+                state.iCtx.scale(dpr, dpr);
                 state.iCtx.translate(state.panX, state.panY);
                 state.iCtx.scale(state.zoom, state.zoom);
                 state.iCtx.strokeStyle = 'rgba(0, 122, 255, 0.8)';
                 state.iCtx.fillStyle = 'rgba(0, 122, 255, 0.1)';
                 state.iCtx.lineWidth = 1 / state.zoom;
                 state.iCtx.beginPath();
-                state.iCtx.rect(state.startPos.x, state.startPos.y, pos.x - state.startPos.x, pos.y - state.startPos.y);
+                state.iCtx.rect(state.startPos.x, state.startPos.y, state.selectionBox.width, state.selectionBox.height);
                 state.iCtx.fill();
                 state.iCtx.stroke();
                 state.iCtx.restore();
                 return;
         }
-        
+
         const isShapeTool = !['brush', 'smart-brush', 'eraser', 'select', 'pan'].includes(state.activeTool);
-        
+
         if ((state.isDrawing && isShapeTool) || state.currentAction.startsWith('drawing')) {
-            state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
-            tools.handleShapeDrawing(state.iCtx, state, pos, e);
+            let finalPos = pos;
+            if (state.snapToRuler) finalPos = utils.snapToRulers(finalPos, state.rulers, state.zoom);
+
+            if (state.activeDrawingSticker) {
+                const sticker = state.activeDrawingSticker;
+                state.iCtx.setTransform(1, 0, 0, 1, 0, 0);
+                state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
+                sticker.renderDrawing();
+                
+                const mockState = {
+                    ...state,
+                    zoom: state.zoom,
+                    panX: -state.zoom * sticker.x,
+                    panY: -state.zoom * sticker.y
+                };
+                tools.handleShapeDrawing(sticker.ctx, mockState, finalPos, e);
+            } else {
+                state.iCtx.setTransform(1, 0, 0, 1, 0, 0);
+                state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
+                tools.handleShapeDrawing(state.iCtx, state, finalPos, e);
+            }
         }
         else if (state.isDrawing) {
+            // --- ANDROID GHOST FIX: Возможный баг с getCoalescedEvents на Android ---
+            // На некоторых Android-устройствах Chrome getCoalescedEvents возвращает
+            // координаты в физических пикселях (unscaled), а не в CSS-пикселях, 
+            // что приводит к двойному или уменьшенному рисованию (призракам).
+            // Используем только само событие.
+            const events = [e];
+            // ------------------------------------------------------------------------
+
             if (state.activeTool === 'brush' || state.activeTool === 'smart-brush') {
-                const point = [pos.x, pos.y];
-                if (state.tempLayer.hasPressure) {
-                    const rawPressure = e.pressure > 0 ? e.pressure : 0.5;
-                    const pressure = rawPressure < 0.5 ? rawPressure * 2 : rawPressure + 0.5;
-                    point.push(pressure);
+                for (const subEvent of events) {
+                    let subPos = utils.getMousePos(subEvent, state);
+                    if (state.snapToRuler) subPos = utils.snapToRulers(subPos, state.rulers, state.zoom);
+                    
+                    const point = [subPos.x, subPos.y];
+
+                    if (state.tempLayer.hasPressure) {
+                        const rawPressure = subEvent.pressure > 0 ? subEvent.pressure : 0.5;
+                        const pressure = rawPressure < 0.5 ? rawPressure * 2 : rawPressure + 0.5;
+                        point.push(pressure);
+                    }
+                    state.tempLayer.points.push(...point);
+                    state.lastBrushPoint = subPos;
+                    // Smart-brush: update last significant move time if pointer moved enough
+                    if (state.lastSignificantMovePos) {
+                        const dx = subPos.x - state.lastSignificantMovePos.x;
+                        const dy = subPos.y - state.lastSignificantMovePos.y;
+                        if (dx * dx + dy * dy > 9) { // > 3px movement
+                            state.lastSignificantMoveTime = Date.now();
+                            state.lastSignificantMovePos = { x: subPos.x, y: subPos.y };
+                        }
+                    }
                 }
-                state.tempLayer.points.push(...point);
 
-                const iCtx = state.iCtx;
-                iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
-                
-                iCtx.save();
-                iCtx.translate(state.panX, state.panY);
-                iCtx.scale(state.zoom, state.zoom);
+                if (state.activeDrawingSticker) {
+                    state.activeDrawingSticker.renderDrawing();
+                } else {
+                    const iCtx = state.iCtx;
+                    iCtx.setTransform(1, 0, 0, 1, 0, 0);
+                    iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
 
-                drawLayer(iCtx, state.tempLayer, state);
-                
-                iCtx.restore();
+                    iCtx.save();
+                    iCtx.scale(dpr, dpr);
+                    iCtx.translate(state.panX, state.panY);
+                    iCtx.scale(state.zoom, state.zoom);
 
-                state.lastBrushPoint = pos;
+                    drawLayer(iCtx, state.tempLayer, state);
+                    iCtx.restore();
+                }
 
                 if (state.activeTool === 'smart-brush') {
                     clearTimeout(state.shapeRecognitionTimer);
@@ -613,7 +1247,27 @@ export function draw(state, callbacks, e) {
                                 lineStyle: state.tempLayer.lineStyle
                             };
                             state.layers.push(newLayer);
+                            if (state.tileManager) state.tileManager.invalidateLayer(newLayer, state);
+
+                            if (state.spatialGrid) {
+                                const box = geo.getTransformedBoundingBox(newLayer);
+                                if (box) {
+                                    const startCol = Math.floor(box.x / 500);
+                                    const endCol = Math.floor((box.x + box.width) / 500);
+                                    const startRow = Math.floor(box.y / 500);
+                                    const endRow = Math.floor((box.y + box.height) / 500);
+                                    for (let r = startRow; r <= endRow; r++) {
+                                        for (let c = startCol; c <= endCol; c++) {
+                                            const cellKey = `${c}_${r}`;
+                                            if (!state.spatialGrid.has(cellKey)) state.spatialGrid.set(cellKey, []);
+                                            state.spatialGrid.get(cellKey).push(newLayer);
+                                        }
+                                    }
+                                }
+                            }
+
                             state.tempLayer.points = [];
+                            state.iCtx.setTransform(1, 0, 0, 1, 0, 0);
                             state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
                             state.isDrawing = false;
                             state.shapeWasJustRecognized = true;
@@ -623,25 +1277,26 @@ export function draw(state, callbacks, e) {
                     }, 500);
                 }
             } else if (state.activeTool === 'eraser') {
-                const layerToErase = hitTest.getLayerAtPosition(pos, state.layers, state.zoom, state.spatialGrid);
-                if (layerToErase && layerToErase.type !== 'image' && layerToErase.type !== 'pdf' && !state.layersToErase.has(layerToErase)) {
-                    state.layersToErase.add(layerToErase);
-                    state.didErase = true;
-                    redrawCallback();
+                let needsRedraw = false;
+
+                // --- ИЗМЕНЕНИЕ: Обновляем DOM-курсор ---
+                updateEraserCursor(e.clientX, e.clientY, state.zoom, true, state.activeEraserWidth);
+                // ---------------------------------------
+
+                for (const subEvent of events) {
+                    const subPos = utils.getMousePos(subEvent, state);
+                    const layerToErase = hitTest.getLayerForEraser(subPos, state.layers, state.zoom, state.spatialGrid, state.layerBBoxCache, state.activeEraserWidth);
+
+                    if (layerToErase && layerToErase.type !== 'image' && layerToErase.type !== 'pdf' && !state.layersToErase.has(layerToErase)) {
+                        state.layersToErase.add(layerToErase);
+                        if (state.tileManager) state.tileManager.invalidateLayer(layerToErase, state);
+                        state.didErase = true;
+                        needsRedraw = true;
+                    }
                 }
 
-                if (!document.body.classList.contains('no-animations')) {
-                    state.lastEraserPos = pos;
-                } else {
-                    state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
-                    state.iCtx.save();
-                    state.iCtx.translate(state.panX, state.panY);
-                    state.iCtx.scale(state.zoom, state.zoom);
-                    state.iCtx.fillStyle = 'rgba(135, 206, 250, 0.75)';
-                    state.iCtx.beginPath();
-                    state.iCtx.arc(pos.x, pos.y, 12 / state.zoom, 0, 2 * Math.PI);
-                    state.iCtx.fill();
-                    state.iCtx.restore();
+                if (needsRedraw) {
+                    redrawCallback();
                 }
             }
         }
@@ -650,6 +1305,25 @@ export function draw(state, callbacks, e) {
             clearTimeout(state.hoverCheckTimer);
         }
         state.hoverCheckTimer = setTimeout(() => {
+            if (state.rulers && state.rulers.length > 0 && state.activeTool !== 'eraser') {
+                const hitPart = hitTest.getHitRulerPart(pos, state.rulers, state.zoom);
+                if (hitPart) {
+                    if (hitPart.part === 'rotate') {
+                        updateCursor(state, 'rotate');
+                        return;
+                    } else if (hitPart.part === 'pivot') {
+                        updateCursor(state, 'pivot');
+                        return;
+                    } else if (hitPart.part === 'body') {
+                        state.canvas.style.cursor = getSelectCursor();
+                        return;
+                    } else if (hitPart.part === 'settings' || hitPart.part === 'delete') {
+                        state.canvas.style.cursor = 'pointer';
+                        return;
+                    }
+                }
+            }
+
             const handle = (state.selectedLayers.length > 0)
                 ? hitTest.getHandleAtPosition(pos, state.selectedLayers, state.zoom, state.groupRotation)
                 : null;
@@ -658,21 +1332,35 @@ export function draw(state, callbacks, e) {
                 const rotation = hitTest.getSelectionRotation(state.selectedLayers, state.groupRotation);
                 updateCursor(state, handle, rotation);
             } else {
-                const layerAtPos = hitTest.getLayerAtPosition(pos, state.layers, state.zoom, state.spatialGrid);
+                let layerAtPos = hitTest.getLayerAtPosition(pos, state.layers, state.zoom, state.spatialGrid);
+                if (state.editingAnnotationsLayerId && layerAtPos) {
+                    const parentLayer = state.layers.find(l => l.id === state.editingAnnotationsLayerId);
+                    const isChild = layerAtPos.parentId === state.editingAnnotationsLayerId;
+                    const isSamePage = parentLayer && parentLayer.type === 'pdf' ? layerAtPos.parentPage === parentLayer.currentPage : true;
+                    if (!isChild || !isSamePage) {
+                        layerAtPos = null;
+                    }
+                }
                 const isOverSelectedLayer = layerAtPos && state.selectedLayers.some(l => l.id === layerAtPos.id);
 
-                if (state.activeTool === 'select') {
-                    if (isOverSelectedLayer) {
-                        state.canvas.style.cursor = 'grab';
-                    } else if (layerAtPos) {
-                        state.canvas.style.cursor = layerAtPos.type === 'text' ? 'text' : 'pointer';
-                    } else {
-                        state.canvas.style.cursor = '';
-                    }
+                if (state.activeTool === 'eraser') {
+                    // Do nothing, keep the custom SVG eraser cursor
                 } else if (state.activeTool === 'pan') {
-                    state.canvas.style.cursor = 'grab';
+                    // Pan tool always shows hand cursor regardless of what's under the pointer
+                    state.canvas.style.cursor = getHandCursor();
+                } else if (state.activeTool === 'select') {
+                    if (isOverSelectedLayer) {
+                        state.canvas.style.cursor = getSelectCursor();
+                    } else if (layerAtPos) {
+                        // PDF and image show our select cursor, text shows text cursor
+                        state.canvas.style.cursor = layerAtPos.type === 'text' ? 'text' : getSelectCursor();
+                    } else {
+                        state.canvas.style.cursor = getSelectCursor();
+                    }
                 } else {
-                    state.canvas.style.cursor = '';
+                    // Для кисти, умной кисти и других инструментов —
+                    // используем updateCursor, чтобы не потерять иконку-курсор
+                    updateCursor(state, null);
                 }
             }
         }, 50);
@@ -680,173 +1368,302 @@ export function draw(state, callbacks, e) {
 }
 
 export function stopDrawing(state, callbacks, e) {
+
+    if (e.pointerId !== undefined) {
+        state.activePointers.delete(e.pointerId);
+    }
+
+    if (state.activeTool === 'laser') {
+        state.isDrawing = false;
+        // Fix: also handle panning cleanup when laser is active and user was panning
+        if (state.isPanning) {
+            state.isPanning = false;
+            state.lastPanPos = null;
+            state.cacheCtx.setTransform(1, 0, 0, 1, 0, 0);
+            state.cacheCtx.clearRect(0, 0, state.cacheCanvas.width, state.cacheCanvas.height);
+            callbacks.redrawCallback();
+            // Restore laser cursor (hidden) after panning ends
+            state.canvas.style.cursor = 'none';
+        }
+        document.removeEventListener('pointermove', state.onPointerMove);
+        document.removeEventListener('pointerup', state.onPointerUp);
+        return;
+    }
+
+    if (state.activeRuler) {
+        state.activeRuler = null;
+        state.rulerAction = null;
+        if (state.saveViewState) state.saveViewState();
+        updateCursor(state, null);
+        callbacks.redrawCallback();
+        document.removeEventListener('pointermove', state.onPointerMove);
+        document.removeEventListener('pointerup', state.onPointerUp);
+        return;
+    }
+
     if (state.isInteracting) {
+        // --- Обновляем текстовые слои после масштабирования/перемещения ---
+        const textLayers = state.selectedLayers.filter(l => l.type === 'text');
+        if (textLayers.length > 0 && (state.currentAction === 'scaling' || state.currentAction === 'moving')) {
+            textLayers.forEach(layer => {
+                layer.cachedImage = null; // clear stretched preview before reflow
+                utils.createTextImage(layer).then(img => {
+                    layer.cachedImage = img;
+                    if (state.tileManager) state.tileManager.invalidateLayer(layer, state);
+                    callbacks.redrawCallback();
+                });
+            });
+
+            // Если текст редактируется — обновляем DOM-редактор с актуальными свойствами
+            const editingText = textLayers.find(l => l.isEditing);
+            if (editingText && state.syncTextEditorWithCanvas) {
+                // Обновляем содержимое и стили редактора
+                const editorDiv = textTool.getEditorTextarea();
+                if (editorDiv) {
+                    editorDiv.innerHTML = editingText.content || '';
+                    textTool.updateEditorStyle(editingText);
+                }
+                state.syncTextEditorWithCanvas(state);
+            }
+        }
+
         state.isInteracting = false;
+        state.iCtx.setTransform(1, 0, 0, 1, 0, 0);
         state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
+        state.cacheCtx.setTransform(1, 0, 0, 1, 0, 0);
         state.cacheCtx.clearRect(0, 0, state.cacheCanvas.width, state.cacheCanvas.height);
     }
+
     if (state.currentAction === 'drawingCurve') {
         const pos = utils.getMousePos(e, state);
-        
-        if (!state.tempLayer || !state.tempLayer.nodes) { 
-             document.removeEventListener('pointermove', state.onPointerMove);
-             document.removeEventListener('pointerup', state.onPointerUp);
-             return; 
+
+        if (!state.tempLayer || !state.tempLayer.nodes) {
+            document.removeEventListener('pointermove', state.onPointerMove);
+            document.removeEventListener('pointerup', state.onPointerUp);
+            return;
         }
 
         const nodes = state.tempLayer.nodes;
         const currentNode = nodes[nodes.length - 1];
-    
+
         const dragDistance = Math.hypot(pos.x - state.dragStartPos.x, pos.y - state.dragStartPos.y);
         if (state.isDrawing && dragDistance < 5 / state.zoom) {
             currentNode.h1 = { ...currentNode.p };
             currentNode.type = 'corner';
         }
-    
+
         state.isDrawing = false;
-        
+
+        state.iCtx.setTransform(1, 0, 0, 1, 0, 0);
         state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
         tools.handleShapeDrawing(state.iCtx, state, pos, e);
-    
+
         document.removeEventListener('pointermove', state.onPointerMove);
         document.removeEventListener('pointerup', state.onPointerUp);
-        
+
         return;
     }
 
     if (state.isMultiTouching) return;
 
     const { redrawCallback, saveState, updateToolbarCallback } = callbacks;
-    
+
     if (checkAndHandleSpenEraser(state, e, callbacks)) {
         state.isDrawing = false;
         state.currentAction = 'none';
         return;
     }
-    
+
     const isMultiStepTool = ['parallelogram', 'triangle', 'parallelepiped', 'pyramid', 'truncated-pyramid', 'trapezoid', 'frustum', 'truncated-sphere'].includes(state.activeTool);
 
     if (isMultiStepTool && state.isDrawing) {
-        state.isDrawing = false; 
+        state.isDrawing = false;
         const rawEnd = utils.getMousePos(e, state);
         let finalStart = { ...state.startPos };
         let finalEnd = rawEnd;
 
-        const shouldSnap = (state.snappingMode === 'manual' && e.altKey) || (state.snappingMode === 'auto' && !e.altKey);
-        if (shouldSnap) { /* ... */ }
-        if (state.activeTool === 'line' && e.shiftKey) { /* ... */ }
+        // Привязка к сетке должна применяться и при фиксации шага, иначе
+        // фигура "прыгает" с привязанного превью на сырые координаты.
+        const shouldSnapEnd = (state.snappingMode === 'manual' && e.altKey) || (state.snappingMode === 'auto' && !e.altKey);
+        if (shouldSnapEnd) {
+            const snapThreshold = 10 / state.zoom;
+            const snappedX = utils.snapToGrid(finalEnd.x);
+            const snappedY = utils.snapToGrid(finalEnd.y);
+            finalEnd = {
+                x: (Math.abs(snappedX - finalEnd.x) < snapThreshold) ? snappedX : finalEnd.x,
+                y: (Math.abs(snappedY - finalEnd.y) < snapThreshold) ? snappedY : finalEnd.y
+            };
+        }
 
-        const commonProps = { color: state.activeColor, lineWidth: state.activeLineWidth, id: Date.now(), rotation: 0, pivot: { x: 0, y: 0 }, lineStyle: state.activeLineStyle };
-        
+        const commonProps = { color: state.activeColor, lineWidth: state.activeLineWidth, fillColor: state.activeFillColor, id: Date.now(), rotation: 0, pivot: { x: 0, y: 0 }, lineStyle: state.activeLineStyle };
+        if (state.activeDrawingSticker) {
+            commonProps.parentId = state.activeDrawingSticker.id;
+            commonProps._parentRef = state.activeDrawingSticker.canvasState.layers.find(l => l.id === state.activeDrawingSticker.id);
+            commonProps.parentPage = 1;
+        }
+
         if (!state.currentAction.startsWith('drawing')) {
-            switch(state.activeTool) {
-                case 'parallelogram': 
-                    state.currentAction = 'drawingParallelogramSlant'; 
-                    state.tempLayer = { type: 'parallelogram', x: Math.min(finalEnd.x, finalStart.x), y: Math.min(finalEnd.y, finalStart.y), width: Math.abs(finalEnd.x - finalStart.x), height: Math.abs(finalEnd.y - finalStart.y), slantOffset: 0, ...commonProps }; 
+            switch (state.activeTool) {
+                case 'parallelogram': state.currentAction = 'drawingParallelogramSlant'; state.tempLayer = { type: 'parallelogram', x: Math.min(finalEnd.x, finalStart.x), y: Math.min(finalEnd.y, finalStart.y), width: Math.abs(finalEnd.x - finalStart.x), height: Math.abs(finalEnd.y - finalStart.y), slantOffset: 0, ...commonProps }; break;
+                case 'triangle': state.currentAction = 'drawingTriangleApex'; state.tempLayer = { type: 'triangle', p1: finalStart, p2: finalEnd, p3: finalEnd, ...commonProps }; break;
+                case 'parallelepiped': state.currentAction = 'drawingParallelepipedDepth'; state.tempLayer = { type: 'parallelepiped', x: Math.min(finalEnd.x, finalStart.x), y: Math.min(finalEnd.y, finalStart.y), width: Math.abs(finalEnd.x - finalStart.x), height: Math.abs(finalEnd.y - finalStart.y), depthOffset: { x: 0, y: 0 }, ...commonProps }; break;
+                case 'pyramid': {
+                    const startX = Math.min(finalStart.x, finalEnd.x); const startY = Math.min(finalStart.y, finalEnd.y);
+                    const width = Math.abs(finalEnd.x - finalStart.x); const height = Math.abs(finalEnd.y - finalStart.y);
+                    const depth = { x: width * 0.3, y: -height * 0.3 };
+                    const perspectiveBase = {
+                        p1: { x: startX, y: startY + height },
+                        p2: { x: startX + width, y: startY + height },
+                        p3: { x: startX + width + depth.x, y: startY + height + depth.y },
+                        p4: { x: startX + depth.x, y: startY + height + depth.y }
+                    };
+                    state.currentAction = 'drawingPyramidApex';
+                    state.tempLayer = { type: 'pyramid', base: perspectiveBase, apex: { x: startX + width / 2, y: startY }, ...commonProps };
                     break;
-                case 'triangle':
-                    state.currentAction = 'drawingTriangleApex'; 
-                    state.tempLayer = { type: 'triangle', p1: finalStart, p2: finalEnd, p3: finalEnd, ...commonProps }; 
+                }
+                case 'truncated-pyramid': {
+                    const startX = Math.min(finalStart.x, finalEnd.x); const startY = Math.min(finalStart.y, finalEnd.y);
+                    const width = Math.abs(finalEnd.x - finalStart.x); const height = Math.abs(finalEnd.y - finalStart.y);
+                    const depth = { x: width * 0.3, y: -height * 0.3 };
+                    const perspectiveBase = {
+                        p1: { x: startX, y: startY + height },
+                        p2: { x: startX + width, y: startY + height },
+                        p3: { x: startX + width + depth.x, y: startY + height + depth.y },
+                        p4: { x: startX + depth.x, y: startY + height + depth.y }
+                    };
+                    state.currentAction = 'drawingTruncatedPyramidApex';
+                    state.tempLayer = { type: 'truncated-pyramid', base: perspectiveBase, apex: { x: startX + width / 2, y: startY }, top: null, ...commonProps };
                     break;
-                case 'parallelepiped':
-                    state.currentAction = 'drawingParallelepipedDepth'; 
-                    const width = Math.abs(finalEnd.x - finalStart.x); 
-                    state.tempLayer = { type: 'parallelepiped', x: Math.min(finalEnd.x, finalStart.x), y: Math.min(finalEnd.y, finalStart.y), width, height: Math.abs(finalEnd.y - finalStart.y), depthOffset: { x: width * 0.3, y: -width * 0.3 }, ...commonProps }; 
+                }
+                case 'trapezoid': state.currentAction = 'drawingTrapezoidP3'; state.tempLayer = { type: 'trapezoid', p1: finalStart, p2: finalEnd, p3: finalEnd, p4: finalStart, ...commonProps }; break;
+                case 'frustum': {
+                    const fw = Math.abs(finalEnd.x - finalStart.x); const fh = Math.abs(finalEnd.y - finalStart.y);
+                    const rx1 = fw / 2; const ry1 = rx1 * 0.3;
+                    state.currentAction = 'drawingFrustum';
+                    state.tempLayer = { type: 'frustum', cx: Math.min(finalStart.x, finalEnd.x) + rx1, baseY: Math.max(finalStart.y, finalEnd.y) - ry1, topY: Math.max(finalStart.y, finalEnd.y) - ry1, rx1, ry1, rx2: 0, ry2: 0, ...commonProps };
                     break;
-                case 'pyramid': case 'truncated-pyramid':
-                    state.currentAction = state.activeTool === 'pyramid' ? 'drawingPyramidApex' : 'drawingTruncatedPyramidApex'; 
-                    const x = Math.min(finalEnd.x, finalStart.x); 
-                    const y = Math.min(finalEnd.y, finalStart.y); 
-                    const w = Math.abs(finalEnd.x - finalStart.x); 
-                    const h = Math.abs(finalEnd.y - finalStart.y); 
-                    const d = {x: w * 0.3, y: -w * 0.2}; 
-                    state.tempLayer = { type: state.activeTool, base: { p1: { x: x, y: y + h }, p2: { x: x + w, y: y + h }, p3: { x: x + w + d.x, y: y + h + d.y }, p4: { x: x + d.x, y: y + h + d.y } }, apex: { x: x + w/2, y: y }, ...commonProps }; 
+                }
+                case 'truncated-sphere': {
+                    const tw = Math.abs(finalEnd.x - finalStart.x); const th = Math.abs(finalEnd.y - finalStart.y);
+                    const sx = tw / 2; const sy = th / 2;
+                    state.currentAction = 'drawingTruncatedSphere';
+                    state.tempLayer = { type: 'truncated-sphere', cx: Math.min(finalStart.x, finalEnd.x) + sx, cy: Math.min(finalStart.y, finalEnd.y) + sy, rx: sx, ry: sy, cutY: Math.max(finalStart.y, finalEnd.y), cutR: 0, cutRy: 0, ...commonProps };
                     break;
-                case 'trapezoid':
-                    state.currentAction = 'drawingTrapezoidP3'; 
-                    state.tempLayer = { type: 'trapezoid', p1: finalStart, p2: finalEnd, p3: finalEnd, p4: finalStart, ...commonProps }; 
-                    break;
-                case 'frustum':
-                    state.currentAction = 'drawingFrustum'; 
-                    const rx1 = Math.abs(finalEnd.x - finalStart.x) / 2; 
-                    const cx = finalStart.x + (finalEnd.x - finalStart.x) / 2; 
-                    const baseY = Math.max(finalEnd.y, finalStart.y); 
-                    state.tempLayer = { type: 'frustum', cx, baseY, rx1, ry1: rx1 * 0.3, topY: baseY, rx2: rx1, ry2: rx1 * 0.3, ...commonProps }; 
-                    break;
-                case 'truncated-sphere':
-                    state.currentAction = 'drawingTruncatedSphere'; 
-                    const rx = Math.abs(finalEnd.x - finalStart.x) / 2; 
-                    const ry = e.shiftKey ? rx : Math.abs(finalEnd.y - finalStart.y) / 2;
-                    const cenX = finalStart.x + (finalEnd.x - finalStart.x) / 2; 
-                    const cenY = finalStart.y + (finalEnd.y - finalStart.y)/2; 
-                    state.tempLayer = { type: 'truncated-sphere', cx: cenX, cy: cenY, rx, ry, cutY: cenY, cutR: rx, cutRy: rx * 0.3, ...commonProps }; 
-                    break;
+                }
             }
-
-            if (state.showCreationTooltip && TOOLTIP_MESSAGES[state.currentAction] && (e.pointerType === 'touch' || e.pointerType === 'pen')) {
+            if (state.showCreationTooltip && TOOLTIP_MESSAGES[state.currentAction]) {
                 state.showCreationTooltip(TOOLTIP_MESSAGES[state.currentAction], finalEnd, state);
             }
-
-            document.removeEventListener('pointermove', state.onPointerMove);
-            document.removeEventListener('pointerup', state.onPointerUp);
             return;
         }
     }
-    
+
     if (state.currentAction.startsWith('drawing')) {
-        const finalPos = utils.getMousePos(e, state);
+        let finalPos = utils.getMousePos(e, state);
+
+        // Та же привязка, что и в превью (tools.handleShapeDrawing):
+        // иначе следующий шаг фиксируется по сырым координатам.
+        const shouldSnapStep = (state.snappingMode === 'manual' && e.altKey) || (state.snappingMode === 'auto' && !e.altKey);
+        if (shouldSnapStep) {
+            const snapThreshold = 10 / state.zoom;
+            const snappedX = utils.snapToGrid(finalPos.x);
+            const snappedY = utils.snapToGrid(finalPos.y);
+            finalPos = {
+                x: (Math.abs(snappedX - finalPos.x) < snapThreshold) ? snappedX : finalPos.x,
+                y: (Math.abs(snappedY - finalPos.y) < snapThreshold) ? snappedY : finalPos.y
+            };
+        }
+
         let isFinalStep = false;
         let createdLayer = null;
 
-        if (state.currentAction === 'drawingParallelogramSlant') { const finalSlant = finalPos.x - (state.tempLayer.x + state.tempLayer.width / 2); state.tempLayer.slantOffset = finalSlant; if (state.tempLayer.width > 5 || state.tempLayer.height > 5) { createdLayer = state.tempLayer; } isFinalStep = true; } 
-        else if (state.currentAction === 'drawingTriangleApex') { state.tempLayer.p3 = finalPos; if (Math.abs(state.tempLayer.p1.x - state.tempLayer.p2.x) > 5 || Math.abs(state.tempLayer.p1.y - state.tempLayer.p2.y) > 5) { createdLayer = state.tempLayer; } isFinalStep = true; } 
-        else if (state.currentAction === 'drawingParallelepipedDepth') { state.tempLayer.depthOffset = { x: finalPos.x - (state.tempLayer.x + state.tempLayer.width), y: finalPos.y - state.tempLayer.y }; if (state.tempLayer.width > 5 || state.tempLayer.height > 5) { createdLayer = state.tempLayer; } isFinalStep = true; } 
-        else if (state.currentAction === 'drawingPyramidApex') { state.tempLayer.apex = finalPos; createdLayer = state.tempLayer; isFinalStep = true; } 
-        else if (state.currentAction === 'drawingTruncatedPyramidApex') {
-            state.tempLayer.apex = finalPos;
-            state.currentAction = 'drawingTruncatedPyramidTop';
-            if (state.showCreationTooltip && (e.pointerType === 'touch' || e.pointerType === 'pen')) {
-                state.showCreationTooltip(TOOLTIP_MESSAGES[state.currentAction], finalPos, state);
-            }
-            document.removeEventListener('pointermove', state.onPointerMove);
-            document.removeEventListener('pointerup', state.onPointerUp);
-            return;
-        } 
-        else if (state.currentAction === 'drawingTruncatedPyramidTop') { const { base, apex } = state.tempLayer; const totalHeight = Math.abs(apex.y - base.p1.y); const cutHeight = Math.abs(finalPos.y - base.p1.y); const ratio = Math.max(0.05, Math.min(0.95, cutHeight / totalHeight)); const interpolate = (p1, p2) => ({ x: p1.x + (p2.x - p1.x) * ratio, y: p1.y + (p2.y - p1.y) * ratio }); state.tempLayer.top = { p1: interpolate(base.p1, apex), p2: interpolate(base.p2, apex), p3: interpolate(base.p3, apex), p4: interpolate(base.p4, apex), }; delete state.tempLayer.apex; createdLayer = state.tempLayer; isFinalStep = true; } 
-        else if (state.currentAction === 'drawingTrapezoidP3') {
-            state.tempLayer.p3 = finalPos;
-            state.currentAction = 'drawingTrapezoidP4';
-            if (state.showCreationTooltip && (e.pointerType === 'touch' || e.pointerType === 'pen')) {
-                state.showCreationTooltip(TOOLTIP_MESSAGES[state.currentAction], finalPos, state);
-            }
-            document.removeEventListener('pointermove', state.onPointerMove);
-            document.removeEventListener('pointerup', state.onPointerUp);
-            return;
-        } 
-        else if (state.currentAction === 'drawingTrapezoidP4') { state.tempLayer.p4 = finalPos; if (Math.abs(state.tempLayer.p1.x - state.tempLayer.p2.x) > 5) { createdLayer = state.tempLayer; } isFinalStep = true; } 
-        else if (state.currentAction === 'drawingFrustum') { const { cx } = state.tempLayer; state.tempLayer.topY = finalPos.y; state.tempLayer.rx2 = Math.abs(finalPos.x - cx); state.tempLayer.ry2 = state.tempLayer.rx2 * 0.3; createdLayer = state.tempLayer; isFinalStep = true; } 
-        else if (state.currentAction === 'drawingTruncatedSphere') { const { cx, cy, rx, ry } = state.tempLayer; const cutY = Math.max(cy - ry, Math.min(cy + ry, finalPos.y)); const h = Math.abs(cutY - cy); const ratioY = h / ry; const cutRx = rx * Math.sqrt(1 - (ratioY * ratioY)); state.tempLayer.cutY = cutY; state.tempLayer.cutR = cutRx > 0 ? cutRx : 0; state.tempLayer.cutRy = state.tempLayer.cutR * 0.3; createdLayer = state.tempLayer; isFinalStep = true; }
-        
+        if (state.currentAction === 'drawingParallelogramSlant') {
+            const finalSlant = finalPos.x - (state.tempLayer.x + state.tempLayer.width / 2);
+            state.tempLayer.slantOffset = finalSlant; createdLayer = state.tempLayer; isFinalStep = true;
+        } else if (state.currentAction === 'drawingTriangleApex') {
+            state.tempLayer.p3 = finalPos; createdLayer = state.tempLayer; isFinalStep = true;
+        } else if (state.currentAction === 'drawingParallelepipedDepth') {
+            state.tempLayer.depthOffset = { x: finalPos.x - (state.tempLayer.x + state.tempLayer.width), y: finalPos.y - state.tempLayer.y }; createdLayer = state.tempLayer; isFinalStep = true;
+        } else if (state.currentAction === 'drawingPyramidApex') {
+            state.tempLayer.apex = finalPos; createdLayer = state.tempLayer; isFinalStep = true;
+        } else if (state.currentAction === 'drawingTruncatedPyramidApex') {
+            state.tempLayer.apex = finalPos; state.currentAction = 'drawingTruncatedPyramidTop';
+            if (state.showCreationTooltip) state.showCreationTooltip(TOOLTIP_MESSAGES[state.currentAction], finalPos, state);
+        } else if (state.currentAction === 'drawingTruncatedPyramidTop') {
+            const { base, apex } = state.tempLayer;
+            const totalHeight = Math.abs(apex.y - base.p1.y);
+            const cutHeight = Math.abs(finalPos.y - base.p1.y);
+            const ratio = Math.max(0.05, Math.min(0.95, cutHeight / totalHeight));
+            const interpolate = (p1, p2) => ({ x: p1.x + (p2.x - p1.x) * ratio, y: p1.y + (p2.y - p1.y) * ratio });
+            state.tempLayer.top = { p1: interpolate(base.p1, apex), p2: interpolate(base.p2, apex), p3: interpolate(base.p3, apex), p4: interpolate(base.p4, apex) };
+            delete state.tempLayer.apex;
+            createdLayer = state.tempLayer; isFinalStep = true;
+        } else if (state.currentAction === 'drawingTrapezoidP3') {
+            state.tempLayer.p3 = finalPos; state.currentAction = 'drawingTrapezoidP4';
+            if (state.showCreationTooltip) state.showCreationTooltip(TOOLTIP_MESSAGES[state.currentAction], finalPos, state);
+        } else if (state.currentAction === 'drawingTrapezoidP4') {
+            state.tempLayer.p4 = finalPos; createdLayer = state.tempLayer; isFinalStep = true;
+        } else if (state.currentAction === 'drawingFrustum') {
+            state.tempLayer.topY = finalPos.y;
+            state.tempLayer.rx2 = Math.abs(finalPos.x - state.tempLayer.cx);
+            state.tempLayer.ry2 = state.tempLayer.rx2 * 0.3;
+            createdLayer = state.tempLayer; isFinalStep = true;
+        } else if (state.currentAction === 'drawingTruncatedSphere') {
+            state.tempLayer.cutY = finalPos.y;
+            const h = Math.abs(state.tempLayer.cutY - state.tempLayer.cy);
+            const ratioY = h / state.tempLayer.ry;
+            if (ratioY >= 1) { state.tempLayer.cutR = 0; }
+            else { state.tempLayer.cutR = state.tempLayer.rx * Math.sqrt(1 - ratioY * ratioY); }
+            state.tempLayer.cutRy = state.tempLayer.cutR * 0.3;
+            createdLayer = state.tempLayer; isFinalStep = true;
+        }
+
         if (isFinalStep) {
             if (createdLayer) {
                 const newLayer = utils.cloneLayersForAction([createdLayer])[0];
                 state.layers.push(newLayer);
+                if (state.tileManager) state.tileManager.invalidateLayer(newLayer, state);
+
+                // Add to spatial grid
+                if (state.spatialGrid) {
+                    const box = geo.getTransformedBoundingBox(newLayer);
+                    if (box) {
+                        const startCol = Math.floor(box.x / 500);
+                        const endCol = Math.floor((box.x + box.width) / 500);
+                        const startRow = Math.floor(box.y / 500);
+                        const endRow = Math.floor((box.y + box.height) / 500);
+                        for (let r = startRow; r <= endRow; r++) {
+                            for (let c = startCol; c <= endCol; c++) {
+                                const cellKey = `${c}_${r}`;
+                                if (!state.spatialGrid.has(cellKey)) state.spatialGrid.set(cellKey, []);
+                                state.spatialGrid.get(cellKey).push(newLayer);
+                            }
+                        }
+                    }
+                }
+
                 saveState({ type: 'creation', before: [], after: [newLayer] });
             }
             state.currentAction = 'none';
             state.tempLayer = null;
-            if (state.hideCreationTooltip) {
-                state.hideCreationTooltip();
-            }
-            redrawCallback();
+            if (state.hideCreationTooltip) state.hideCreationTooltip();
         }
+        redrawCallback();
     }
-    
+
     document.removeEventListener('pointermove', state.onPointerMove);
     document.removeEventListener('pointerup', state.onPointerUp);
 
+    state.iCtx.setTransform(1, 0, 0, 1, 0, 0);
     state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
-    
+
+    // ВАЖНО: Если мы завершили один из шагов сложной фигуры (но не саму фигуру целиком),
+    // нам нужно сразу же отрисовать превью для следующего шага
+    if (state.currentAction && state.currentAction.startsWith('drawing')) {
+        const _finalPos = utils.getMousePos(e, state);
+        tools.handleShapeDrawing(state.iCtx, state, _finalPos, e);
+    }
+
     if (state.isEditingText) {
         const textarea = textTool.getEditorTextarea();
         if (textarea) textarea.style.pointerEvents = 'auto';
@@ -859,60 +1676,130 @@ export function stopDrawing(state, callbacks, e) {
 
     if (state.isPanning) {
         state.isPanning = false;
-
-        // --- НАЧАЛО ИЗМЕНЕНИЙ: Финальная отрисовка после панорамирования ---
-        // Окончательно обновляем координаты панорамирования.
-        const dx = e.clientX - state.panStartPos.x;
-        const dy = e.clientY - state.panStartPos.y;
-        state.panX = state.initialPan.x + dx;
-        state.panY = state.initialPan.y + dy;
+        state.lastPanPos = null;
         
-        // Очищаем кеш и вызываем полную, качественную перерисовку.
-        state.cacheCtx.clearRect(0, 0, state.cacheCanvas.width, state.cacheCanvas.height);
-        redrawCallback();
-        // --- КОНЕЦ ИЗМЕНЕНИЙ ---
-        
+        // Set cursor BEFORE redrawCallback to prevent flash of default browser cursor
         if (state.activeTool === 'pan') {
-            state.canvas.style.cursor = 'grab';
-        } else {
+            state.canvas.style.cursor = getHandCursor();
+        } else if (state.activeTool !== 'eraser') {
             updateCursor(state, null);
         }
+
+        state.cacheCtx.setTransform(1, 0, 0, 1, 0, 0);
+        state.cacheCtx.clearRect(0, 0, state.cacheCanvas.width, state.cacheCanvas.height);
+        redrawCallback();
     }
 
     const transformActions = ['rotating', 'scaling', 'moving', 'movingPivot', 'editingCurve'];
     if (transformActions.includes(state.currentAction)) {
+        // ИЗМЕНЕНИЕ: Формируем группу для трансформации, включая дочерние элементы PDF
+        state.transformGroup = new Set();
+        state.selectedLayers.forEach(l => {
+            if (l.id !== state.editingAnnotationsLayerId) {
+                state.transformGroup.add(l);
+            }
+            if (l.type === 'pdf' || l.type === 'image' || l.type === 'sticker') {
+                state.layers.filter(child => child.parentId === l.id).forEach(child => state.transformGroup.add(child));
+            }
+        });
+        state.transformGroup = Array.from(state.transformGroup);
+
+        // --- NEW: Delete out-of-bounds child layers ---
+        const layersToDelete = [];
+        state.transformGroup.forEach(layer => {
+            if (layer.parentId) {
+                const parent = state.layers.find(p => p.id === layer.parentId);
+                if (parent && parent.type === 'sticker') {
+                    const box = geo.getBoundingBox(layer);
+                    if (box) {
+                        const cx = box.x + box.width / 2;
+                        const cy = box.y + box.height / 2;
+                        const isOutside = cx < parent.x || cx > (parent.x + parent.width) ||
+                                          cy < parent.y || cy > (parent.y + parent.height);
+                        if (isOutside) {
+                            layersToDelete.push(layer);
+                        }
+                    }
+                }
+            }
+        });
+
+        if (layersToDelete.length > 0) {
+            const idsToDelete = new Set(layersToDelete.map(l => l.id));
+            if (state.tileManager) {
+                layersToDelete.forEach(l => state.tileManager.invalidateLayer(l, state));
+            }
+            state.layers = state.layers.filter(l => !idsToDelete.has(l.id));
+            state.selectedLayers = state.selectedLayers.filter(l => !idsToDelete.has(l.id));
+            state.transformGroup = state.transformGroup.filter(l => !idsToDelete.has(l.id));
+
+            saveState({
+                type: 'deletion',
+                before: utils.cloneLayersForAction(layersToDelete),
+                after: []
+            });
+
+            if (state.spatialGrid) {
+                state.spatialGrid = utils.buildSpatialGrid(state.layers);
+            }
+        }
+        // ----------------------------------------------
+
+        state.originalTransformGroup = utils.cloneLayersForAction(state.transformGroup);
         if (state.currentAction === 'rotating') {
-            if (state.selectedLayers.length > 1 && state.groupRotation !== 0) {
-                state.selectedLayers.forEach((layer) => {
+            if (state.transformGroup.length > 1 && state.groupRotation !== 0) {
+                if (state.tileManager) state.transformGroup.forEach(layer => state.tileManager.invalidateLayer(layer, state));
+                state.transformGroup.forEach((layer) => {
                     const box = geo.getBoundingBox(layer);
                     if (!box) return;
-
                     const originalCenter = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
                     const newCenter = geo.rotatePoint(originalCenter, state.groupPivot, state.groupRotation);
-                    
                     const dx = newCenter.x - originalCenter.x;
                     const dy = newCenter.y - originalCenter.y;
-                    
                     utils.translateLayer(layer, dx, dy);
                     layer.rotation = (layer.rotation || 0) + state.groupRotation;
                 });
+                if (state.tileManager) state.transformGroup.forEach(layer => state.tileManager.invalidateLayer(layer, state));
             }
-             state.groupPivot = null;
-             state.groupRotation = 0;
+            state.groupPivot = null;
+            state.groupRotation = 0;
+            
+            // ВАЖНО: Применяем и запекаем `rotation` для деформируемых объектов (кривых/путей).
+            // Это обновит их узлы физически, предотвращая рассинхронизацию интерфейса редактирования.
+            if (state.tileManager) state.transformGroup.forEach(layer => state.tileManager.invalidateLayer(layer, state));
+            state.transformGroup.forEach(layer => {
+                utils.applyTransformations(layer);
+            });
+            if (state.tileManager) state.transformGroup.forEach(layer => state.tileManager.invalidateLayer(layer, state));
         }
 
         const dragDistance = Math.hypot(utils.getMousePos(e, state).x - state.dragStartPos.x, utils.getMousePos(e, state).y - state.dragStartPos.y);
-        
+
         if (state.currentAction === 'editingCurve' && dragDistance < 5 / state.zoom) {
-            // Do nothing if it was just a click
         } else {
-            const finalLayers = utils.cloneLayersForAction(state.selectedLayers);
+            if (state.currentAction === 'moving' || state.currentAction === 'scaling' || state.currentAction === 'rotating') {
+                state.selectedLayers.forEach(layer => {
+                    if (layer.type !== 'pdf' && layer.type !== 'image') {
+                        utils.bindLayerToParent(state, layer);
+                    }
+                });
+            }
+
+            if (state.tileManager) {
+                state.transformGroup.forEach(layer => state.tileManager.invalidateLayer(layer, state));
+            }
+            const finalLayers = utils.cloneLayersForAction(state.transformGroup);
+
+            // Rebuild grid after transformation
+            if (state.spatialGrid) {
+                state.spatialGrid = utils.buildSpatialGrid(state.layers);
+            }
+
             saveState({
                 type: 'update',
-                before: state.originalLayers,
+                before: state.originalTransformGroup,
                 after: finalLayers
             });
-            
             if (state.currentAction === 'scaling' && state.selectedLayers.length === 1 && state.selectedLayers[0].type === 'pdf') {
                 const layer = state.selectedLayers[0];
                 utils.renderPdfPageToCanvas(layer, layer.currentPage).then(redrawCallback);
@@ -923,128 +1810,374 @@ export function stopDrawing(state, callbacks, e) {
     if (state.isEditingText) return;
 
     clearTimeout(state.shapeRecognitionTimer);
-    
+
     if (state.isDrawing) {
         if (state.activeTool === 'brush' || state.activeTool === 'smart-brush') {
             const newLayer = state.tempLayer;
-            if (newLayer && newLayer.points.length > 1) {
-                if (state.smoothingAmount > 0) {
-                    const tolerance = state.smoothingAmount * 0.5;
-                    newLayer.points = utils.simplifyPath(newLayer.points, tolerance);
-                }
-                
-                let finalLayer;
-                if (state.activeTool === 'smart-brush' && !state.shapeWasJustRecognized) {
-                    const recognizedShape = shapeRecognizer.recognizeShape(newLayer.points, newLayer.hasPressure);
-                    if (recognizedShape) {
-                        finalLayer = { ...recognizedShape, color: newLayer.color, lineWidth: newLayer.lineWidth, lineStyle: newLayer.lineStyle };
-                    } else {
-                       finalLayer = newLayer; 
-                    }
-                } else {
-                    finalLayer = newLayer;
-                }
-                state.layers.push(finalLayer);
-                saveState({ type: 'creation', before: [], after: [finalLayer] });
 
-                const ctx = state.ctx;
-                ctx.save();
-                ctx.translate(state.panX, state.panY);
-                ctx.scale(state.zoom, state.zoom);
-                drawLayer(ctx, finalLayer, state);
-                ctx.restore();
+            // --- SMART-BRUSH: Attempt shape recognition before saving ---
+            if (state.activeTool === 'smart-brush' && newLayer && newLayer.points.length > 1) {
+                // Check if user held still at the end of the stroke (confirms intent)
+                const heldAtEnd = state.lastSignificantMoveTime
+                    ? (Date.now() - state.lastSignificantMoveTime > 400)
+                    : false;
+                const recognizedShape = shapeRecognizer.recognizeShape(newLayer.points, newLayer.hasPressure, heldAtEnd);
+                if (recognizedShape) {
+                    // Shape recognized — save the clean shape instead of the raw brush stroke
+                    const shapeLayer = {
+                        ...recognizedShape,
+                        color: newLayer.color,
+                        lineWidth: newLayer.lineWidth,
+                        lineStyle: newLayer.lineStyle
+                    };
+                    if (newLayer.parentId) {
+                        shapeLayer.parentId = newLayer.parentId;
+                        shapeLayer._parentRef = newLayer._parentRef;
+                        shapeLayer.parentPage = newLayer.parentPage;
+                    }
+                    utils.bindLayerToParent(state, shapeLayer);
+                    state.layers.push(shapeLayer);
+                    if (state.tileManager) state.tileManager.invalidateLayer(shapeLayer, state);
+
+                    if (state.spatialGrid) {
+                        const box = geo.getTransformedBoundingBox(shapeLayer);
+                        if (box) {
+                            const startCol = Math.floor(box.x / 500);
+                            const endCol = Math.floor((box.x + box.width) / 500);
+                            const startRow = Math.floor(box.y / 500);
+                            const endRow = Math.floor((box.y + box.height) / 500);
+                            for (let r = startRow; r <= endRow; r++) {
+                                for (let c = startCol; c <= endCol; c++) {
+                                    const cellKey = `${c}_${r}`;
+                                    if (!state.spatialGrid.has(cellKey)) state.spatialGrid.set(cellKey, []);
+                                    state.spatialGrid.get(cellKey).push(shapeLayer);
+                                }
+                            }
+                        }
+                    }
+
+                    state.isDrawing = false;
+                    state.currentAction = 'none';
+                    state.tempLayer = null;
+                    state.shapeWasJustRecognized = true;
+                    redrawCallback();
+                    saveState({ type: 'creation', before: [], after: [shapeLayer] });
+
+                    document.removeEventListener('pointermove', state.onPointerMove);
+                    document.removeEventListener('pointerup', state.onPointerUp);
+
+                    if (state.interactionCanvas && state.iCtx) {
+                        state.iCtx.setTransform(1, 0, 0, 1, 0, 0);
+                        state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
+                    }
+
+                    try {
+                        if (e && e.pointerId !== undefined && e.target && e.target.hasPointerCapture && e.target.hasPointerCapture(e.pointerId)) {
+                            e.target.releasePointerCapture(e.pointerId);
+                        }
+                    } catch (err) { /* ignore */ }
+
+                    return;
+                }
+                // Shape NOT recognized — fall through to save as raw brush stroke
+            }
+            // ---------------------------------------------------------------
+
+            if (newLayer && newLayer.points.length > 1) {
+                utils.bindLayerToParent(state, newLayer);
+                state.layers.push(newLayer);
+                if (state.tileManager) state.tileManager.invalidateLayer(newLayer, state);
+
+                if (state.spatialGrid) {
+                    const box = geo.getTransformedBoundingBox(newLayer);
+                    if (box) {
+                        const startCol = Math.floor(box.x / 500);
+                        const endCol = Math.floor((box.x + box.width) / 500);
+                        const startRow = Math.floor(box.y / 500);
+                        const endRow = Math.floor((box.y + box.height) / 500);
+                        for (let r = startRow; r <= endRow; r++) {
+                            for (let c = startCol; c <= endCol; c++) {
+                                const cellKey = `${c}_${r}`;
+                                if (!state.spatialGrid.has(cellKey)) state.spatialGrid.set(cellKey, []);
+                                state.spatialGrid.get(cellKey).push(newLayer);
+                            }
+                        }
+                    }
+                }
+
+                saveState({ type: 'creation', before: [], after: [newLayer] });
             }
             state.isDrawing = false;
             state.currentAction = 'none';
             state.tempLayer = null;
+            redrawCallback();
+
+            document.removeEventListener('pointermove', state.onPointerMove);
+            document.removeEventListener('pointerup', state.onPointerUp);
+
+            if (state.interactionCanvas && state.iCtx) {
+                state.iCtx.setTransform(1, 0, 0, 1, 0, 0);
+                state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
+                state.interactionCanvas.style.opacity = '0.99';
+                setTimeout(() => { state.interactionCanvas.style.opacity = '1'; }, 10);
+            }
+
+            try {
+                if (e && e.pointerId !== undefined && e.target && e.target.hasPointerCapture && e.target.hasPointerCapture(e.pointerId)) {
+                    e.target.releasePointerCapture(e.pointerId);
+                }
+            } catch (err) {
+                console.warn('Pointer release failed:', err);
+            }
+
             return;
-        } 
-        
+        }
+
         const rawEnd = utils.getMousePos(e, state);
         let finalStart = state.startPos;
         let finalEnd = rawEnd;
 
+        // ... Snapping Logic ...
         const shouldSnap = (state.snappingMode === 'manual' && e.altKey) || (state.snappingMode === 'auto' && !e.altKey);
-        if (shouldSnap) { /* ... */ }
-        
-        if (state.activeTool === 'line' && e.shiftKey) { /* ... */ }
+        if (shouldSnap) {
+            const SNAP_THRESHOLD = 10 / state.zoom;
+            const snappedEndX = utils.snapToGrid(rawEnd.x);
+            const snappedEndY = utils.snapToGrid(rawEnd.y);
+            finalEnd.x = (Math.abs(snappedEndX - rawEnd.x) < SNAP_THRESHOLD) ? snappedEndX : rawEnd.x;
+            finalEnd.y = (Math.abs(snappedEndY - rawEnd.y) < SNAP_THRESHOLD) ? snappedEndY : rawEnd.y;
+        }
 
-        if (state.activeTool === 'eraser') { 
+        if (state.activeTool === 'eraser') {
             if (state.didErase) {
+                // ... erase logic ...
                 const layersToErase = utils.cloneLayersForAction(Array.from(state.layersToErase));
+                if (state.tileManager) layersToErase.forEach(layer => state.tileManager.invalidateLayer(layer, state));
                 const idsToErase = new Set(layersToErase.map(l => l.id));
-                saveState({ type: 'deletion', before: layersToErase, after: [] });
                 state.layers = state.layers.filter(layer => !idsToErase.has(layer.id));
                 state.layersToErase.clear();
+
+                saveState({ type: 'deletion', before: layersToErase, after: [] });
+
+                // Rebuild grid
+                state.spatialGrid = utils.buildSpatialGrid(state.layers);
             }
-            redrawCallback(); 
+            // --- ИЗМЕНЕНИЕ: Скрываем DOM-курсор ---
+            hideEraserCursor();
+            // -------------------------------------
+            redrawCallback();
         } else {
             let newLayer = null;
-            const commonProps = { color: state.activeColor, lineWidth: state.activeLineWidth, id: Date.now(), rotation: 0, pivot: { x: 0, y: 0 }, lineStyle: state.activeLineStyle };
-            switch(state.activeTool) {
+            const commonProps = { color: state.activeColor, fillColor: state.activeFillColor, lineWidth: state.activeLineWidth, id: Date.now(), rotation: 0, pivot: { x: 0, y: 0 }, lineStyle: state.activeLineStyle };
+            switch (state.activeTool) {
                 case 'rect': { const rect = { type: 'rect', x: Math.min(finalEnd.x, finalStart.x), y: Math.min(finalEnd.y, finalStart.y), width: Math.abs(finalEnd.x - finalStart.x), height: Math.abs(finalEnd.y - finalStart.y), ...commonProps }; if (rect.width > 5 || rect.height > 5) newLayer = rect; break; }
-                case 'text': { const width = Math.abs(finalEnd.x - finalStart.x); const height = Math.abs(finalEnd.y - finalStart.y); if (width < 20 || height < 20) { state.isDrawing = false; redrawCallback(); return; } const newTextLayer = { type: 'text', x: Math.min(finalEnd.x, finalStart.x), y: Math.min(finalEnd.y, finalStart.y), width: width, height: height, content: '', color: state.activeTextColor, fontSize: state.activeFontSize, fontFamily: state.activeFontFamily, align: state.activeTextAlign, fontWeight: state.activeFontWeight, fontStyle: state.activeFontStyle, textDecoration: state.activeTextDecoration, id: Date.now(), rotation: 0, pivot: { x: 0, y: 0 } }; state.layers.push(newTextLayer); state.selectedLayers = [newTextLayer]; newTextLayer.isEditing = true; state.isDrawing = true; state.isEditingText = true; state.justCreatedText = true; textTool.startEditing(state, newTextLayer, (isIntermediate, before, after) => { if (isIntermediate) { redrawCallback(); state.updateFloatingToolbar(); if(state.updateTextEditorTransform) state.updateTextEditorTransform(newTextLayer, state); return; } state.isEditingText = false; const finishedLayer = state.layers.find(l => l.id === newTextLayer.id); if (finishedLayer) { finishedLayer.isEditing = false; } if (state.justCreatedText) { const selectButton = document.querySelector('button[data-tool="select"]'); if (selectButton) { selectButton.click(); } state.justCreatedText = false; } if (before && after) { saveState({ type: 'creation', before, after }); } redrawCallback(); state.updateFloatingToolbar(); }); state.isDrawing = false; return; }
-                case 'rhombus': { const x = Math.min(finalEnd.x, finalStart.x); const y = Math.min(finalEnd.y, finalStart.y); const width = Math.abs(finalEnd.x - finalStart.x); const height = Math.abs(finalEnd.y - finalStart.y); if(width>5 && height>5) newLayer = { type: 'rhombus', p1: {x: x+width/2, y: y}, p2: {x: x+width, y: y+height/2}, p3: {x: x+width/2, y: y+height}, p4: {x: x, y: y+height/2}, ...commonProps }; break; }
-                case 'ellipse': case 'sphere': case 'cone': { const width = Math.abs(finalEnd.x - finalStart.x); const height = Math.abs(finalEnd.y - finalStart.y); const cx = finalStart.x + (finalEnd.x - finalStart.x) / 2; const cy = finalStart.y + (finalEnd.y - finalStart.y) / 2; if (state.activeTool === 'sphere') { const rx = width / 2; const ry = e.shiftKey ? rx : height / 2; if (rx > 2 || ry > 2) newLayer = { type: 'sphere', cx, cy, rx, ry, ...commonProps }; } else if (state.activeTool === 'cone') { const rx = width / 2; const apex = {x: cx, y: Math.min(finalEnd.y, finalStart.y)}; const baseY = Math.max(finalEnd.y, finalStart.y); if (rx > 5 && height > 5) newLayer = { type: 'cone', cx, baseY, rx, ry: rx * 0.3, apex, ...commonProps }; } else { const rx = width / 2; const ry = height/2; if (rx > 2 || ry > 2) newLayer = { type: 'ellipse', cx, cy, rx, ry, ...commonProps }; } break; }
+                case 'ellipse': { const rx = Math.abs(finalEnd.x - finalStart.x) / 2; const ry = e.shiftKey ? rx : Math.abs(finalEnd.y - finalStart.y) / 2; newLayer = { type: 'ellipse', cx: finalStart.x + (finalEnd.x - finalStart.x) / 2, cy: finalStart.y + (finalEnd.y - finalStart.y) / 2, rx, ry, ...commonProps }; if (rx < 2 || ry < 2) newLayer = null; break; }
+                case 'sphere': { const rx = Math.abs(finalEnd.x - finalStart.x) / 2; const ry = e.shiftKey ? rx : Math.abs(finalEnd.y - finalStart.y) / 2; newLayer = { type: 'sphere', cx: finalStart.x + (finalEnd.x - finalStart.x) / 2, cy: finalStart.y + (finalEnd.y - finalStart.y) / 2, rx, ry, ...commonProps }; if (rx < 2 || ry < 2) newLayer = null; break; }
+                case 'cone': { const rx = Math.abs(finalEnd.x - finalStart.x) / 2; const ry = rx * 0.3; newLayer = { type: 'cone', cx: finalStart.x + (finalEnd.x - finalStart.x) / 2, baseY: Math.max(finalStart.y, finalEnd.y) - ry, rx, ry, apex: { x: finalStart.x + (finalEnd.x - finalStart.x) / 2, y: Math.min(finalStart.y, finalEnd.y) }, ...commonProps }; break; }
+                case 'rhombus': {
+                    const x = Math.min(finalEnd.x, finalStart.x);
+                    const y = Math.min(finalEnd.y, finalStart.y);
+                    const width = Math.abs(finalEnd.x - finalStart.x);
+                    const height = Math.abs(finalEnd.y - finalStart.y);
+                    newLayer = {
+                        type: 'rhombus',
+                        p1: { x: x + width / 2, y: y },
+                        p2: { x: x + width, y: y + height / 2 },
+                        p3: { x: x + width / 2, y: y + height },
+                        p4: { x: x, y: y + height / 2 },
+                        ...commonProps
+                    };
+                    if (width < 5 || height < 5) newLayer = null;
+                    break;
+                }
+                case 'text': {
+                    const width = Math.abs(finalEnd.x - finalStart.x);
+                    const height = Math.abs(finalEnd.y - finalStart.y);
+                    if (width < 20 || height < 20) { state.isDrawing = false; redrawCallback(); return; }
+                    const newTextLayer = {
+                        type: 'text',
+                        x: Math.min(finalEnd.x, finalStart.x),
+                        y: Math.min(finalEnd.y, finalStart.y),
+                        width: width,
+                        height: height,
+                        content: '',
+                        color: state.activeTextColor,
+                        fontSize: state.activeFontSize,
+                        fontFamily: state.activeFontFamily,
+                        align: state.activeTextAlign,
+                        fontWeight: state.activeFontWeight,
+                        fontStyle: state.activeFontStyle,
+                        textDecoration: state.activeTextDecoration,
+                        id: Date.now(),
+                        rotation: 0,
+                        pivot: { x: 0, y: 0 }
+                    };
+                    if (state.activeDrawingSticker) {
+                        newTextLayer.parentId = state.activeDrawingSticker.id;
+                        newTextLayer._parentRef = state.activeDrawingSticker.canvasState.layers.find(l => l.id === state.activeDrawingSticker.id);
+                        newTextLayer.parentPage = 1;
+                    }
+                    utils.bindLayerToParent(state, newTextLayer);
+                    state.layers.push(newTextLayer);
+                    state.selectedLayers = [newTextLayer];
+                    newTextLayer.isEditing = true;
+                    state.isDrawing = true;
+                    state.isEditingText = true;
+                    state.justCreatedText = true;
+                    state.isDrawing = false; // Отключаем, чтобы тайлы обновлялись синхронно без задваивания
+                    if (state.tileManager) state.tileManager.invalidateLayer(newTextLayer, state);
+                    
+                    // ИЗМЕНЕНИЕ: Сразу переключаем на инструмент "Выделение" при создании текста
+                    const selectButton = document.querySelector('button[data-tool="select"]');
+                    if (selectButton) { 
+                        // Меняем инструмент вручную, не вызывая click() на DOM-элементе, чтобы не сбить фокус
+                        state.activeTool = 'select';
+                        document.querySelectorAll('.toolbar button').forEach(btn => btn.classList.remove('active'));
+                        selectButton.classList.add('active');
+                        state.canvas.style.cursor = 'default';
+                        state.canvas.classList.remove('cursor-brush', 'cursor-eraser');
+                        if (callbacks.updateToolbarCallback) callbacks.updateToolbarCallback();
+                    }
+
+                    // ИЗМЕНЕНИЕ: Откладываем старт редактирования, чтобы браузер успел обработать pointerup
+                    state.isEditingText = true; // Устанавливаем до старта
+                    
+                    // Блокируем следующий click, чтобы холст не забрал фокус у текстового редактора
+                    const blockClick = (ev) => {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        window.removeEventListener('click', blockClick, true);
+                    };
+                    window.addEventListener('click', blockClick, true);
+                    setTimeout(() => window.removeEventListener('click', blockClick, true), 200);
+
+                    // Критически важно: освобождаем захват указателя ДО установки фокуса, 
+                    // иначе браузер сбросит фокус с редактора обратно на холст при автоматическом освобождении захвата.
+                    try {
+                        if (e && e.pointerId !== undefined && e.target && e.target.hasPointerCapture && e.target.hasPointerCapture(e.pointerId)) {
+                            e.target.releasePointerCapture(e.pointerId);
+                        }
+                    } catch (err) { }
+
+                    textTool.startEditing(state, newTextLayer, (isIntermediate, before, after) => {
+                        if (isIntermediate) { redrawCallback(); state.updateFloatingToolbar(); if (state.syncTextEditorWithCanvas) state.syncTextEditorWithCanvas(state); return; }
+                        state.isEditingText = false;
+                        const finishedLayer = state.layers.find(l => l.id === newTextLayer.id);
+                        if (finishedLayer) {
+                            finishedLayer.isEditing = false;
+                            if (state.tileManager) state.tileManager.invalidateLayer(finishedLayer, state);
+                        }
+                        if (before && after) { saveState({ type: 'creation', before, after }); }
+                        // Update grid
+                        if (state.spatialGrid) {
+                            state.spatialGrid = utils.buildSpatialGrid(state.layers);
+                        }
+                        redrawCallback();
+                        state.updateFloatingToolbar();
+                    });
+                    
+                    redrawCallback();
+                    state.activeDrawingSticker = null;
+                    return;
+                }
                 case 'line': { const line = { type: 'line', x1: finalStart.x, y1: finalStart.y, x2: finalEnd.x, y2: finalEnd.y, ...commonProps }; if (Math.abs(line.x1 - line.x2) > 5 || Math.abs(line.y1 - line.y2) > 5) newLayer = line; break; }
             }
             if (newLayer) {
+                utils.bindLayerToParent(state, newLayer);
                 state.layers.push(newLayer);
+                if (state.tileManager) state.tileManager.invalidateLayer(newLayer, state);
+
+                // Add to spatial grid
+                if (state.spatialGrid) {
+                    const box = geo.getTransformedBoundingBox(newLayer);
+                    if (box) {
+                        const startCol = Math.floor(box.x / 500);
+                        const endCol = Math.floor((box.x + box.width) / 500);
+                        const startRow = Math.floor(box.y / 500);
+                        const endRow = Math.floor((box.y + box.height) / 500);
+
+                        for (let r = startRow; r <= endRow; r++) {
+                            for (let c = startCol; c <= endCol; c++) {
+                                const cellKey = `${c}_${r}`;
+                                if (!state.spatialGrid.has(cellKey)) state.spatialGrid.set(cellKey, []);
+                                state.spatialGrid.get(cellKey).push(newLayer);
+                            }
+                        }
+                    }
+                }
+
                 saveState({ type: 'creation', before: [], after: [newLayer] });
             }
+            state.isDrawing = false;
+            state.currentAction = 'none';
             redrawCallback();
         }
-    } else if (state.currentAction === 'selectionBox') { 
-      redrawCallback();
+    } else if (state.currentAction === 'selectionBox') {
+        redrawCallback();
     } else {
         redrawCallback();
     }
-    
+
     updateCursor(state, null);
     if (state.currentAction === 'selectionBox') {
         actions.endSelectionBox(state, utils.getMousePos(e, state), e);
-        
+
         if (state.selectedLayers.length > 1) {
             const needsReset = state.selectedLayers.some(l => (l.rotation && l.rotation !== 0) || (l.pivot && (l.pivot.x !== 0 || l.pivot.y !== 0)));
-    
             if (needsReset) {
+                if (state.tileManager) state.selectedLayers.forEach(l => state.tileManager.invalidateLayer(l, state));
                 const before = utils.cloneLayersForAction(state.selectedLayers);
-                
-                state.selectedLayers.forEach(layer => {
-                    utils.applyTransformations(layer);
-                });
-    
+                state.selectedLayers.forEach(layer => { utils.applyTransformations(layer); });
                 const after = utils.cloneLayersForAction(state.selectedLayers);
-                
-                saveState({
-                    type: 'update',
-                    before: before,
-                    after: after,
-                });
+                if (state.tileManager) state.selectedLayers.forEach(l => state.tileManager.invalidateLayer(l, state));
+                saveState({ type: 'update', before: before, after: after });
             }
         }
-        
+        state.currentAction = 'none';
+        state.selectionBox = null;
+        if (state.editingAnnotationsLayerId && window.stickerApp) {
+            const sticker = window.stickerApp.stickers.find(s => s.id === state.editingAnnotationsLayerId);
+            if (sticker) {
+                sticker.renderDrawing();
+            }
+        }
         redrawCallback();
     }
-    
+
     state.updateFloatingToolbar();
-    
+
     if (state.currentAction === 'selectionBox') {
         updateToolbarCallback();
     }
-    
-    state.isDrawing = false; 
-    state.currentAction = 'none'; 
-    state.scalingHandle = null; 
-    state.startPos = null; 
-    state.originalBox = null; 
-    state.originalLayers = []; 
-    state.groupPivot = null; 
-    state.didErase = false; 
-    state.groupRotation = 0; 
-    state.snapPoint = null;
-    state.tempLayer = null;
-    if (state.hideCreationTooltip) {
-        state.hideCreationTooltip();
+
+    const isMidShapeDrawing = state.currentAction.startsWith('drawing');
+    if (!isMidShapeDrawing) {
+        state.isDrawing = false;
+        state.currentAction = 'none';
+        state.tempLayer = null;
+        if (state.hideCreationTooltip) {
+            state.hideCreationTooltip();
+        }
     }
+
+    state.scalingHandle = null;
+    state.startPos = null;
+    state.originalBox = null;
+    state.originalLayers = [];
+    state.groupPivot = null;
+    state.didErase = false;
+    state.groupRotation = 0;
+    state.snapPoint = null;
+    state.redrawInteraction = null;
+    state.activeDrawingSticker = null;
+
+    // --- ANDROID FIX: Освобождаем захват указателя ---
+    try {
+        if (e && e.pointerId !== undefined && e.target && e.target.hasPointerCapture && e.target.hasPointerCapture(e.pointerId)) {
+            e.target.releasePointerCapture(e.pointerId);
+        }
+    } catch (err) {
+        console.warn('Pointer release failed:', err);
+    }
+    // -------------------------------------------------
 }
+// --- END OF FILE js/pointerHandlers.js ---
