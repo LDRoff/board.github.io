@@ -97,10 +97,11 @@ export class Sticker {
             this.stickerApp.startResize(this, e);
         });
         resizer.addEventListener('touchstart', (e) => {
+            e.preventDefault();
             e.stopPropagation();
             this.stickerApp.selectSticker(this);
             this.stickerApp.startResize(this, e.touches[0]);
-        }, { passive: true });
+        }, { passive: false });
         el.appendChild(resizer);
 
         // Circular Ports for connection lines
@@ -109,31 +110,33 @@ export class Sticker {
             port.className = 'port';
             port.dataset.side = side;
             
-            const onPortDown = (e) => {
-                if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) {
+            const onPortDown = (e, point) => {
+                if (e.type === 'mousedown' && e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) {
                     return;
                 }
                 if (e.type === 'mousedown' && this.stickerApp.lastTouchTime && (Date.now() - this.stickerApp.lastTouchTime < 1000)) {
                     return;
                 }
                 e.stopPropagation();
+                if (typeof e.preventDefault === 'function') e.preventDefault();
+
                 // Check if a link already lands on this port and move it
                 const existingLinkIdx = this.stickerApp.links.findIndex(l => l.to === this && l.toSide === side);
                 if (existingLinkIdx > -1) {
                     const link = this.stickerApp.links[existingLinkIdx];
                     this.stickerApp.links.splice(existingLinkIdx, 1);
-                    this.stickerApp.startConnection(link.from, link.fromSide, e, link.color, link.style);
+                    this.stickerApp.startConnection(link.from, link.fromSide, point, link.color, link.style);
                 } else {
-                    this.stickerApp.startConnection(this, side, e);
+                    this.stickerApp.startConnection(this, side, point);
                 }
             };
 
-            port.addEventListener('mousedown', onPortDown);
+            port.addEventListener('mousedown', (e) => onPortDown(e, e));
             port.addEventListener('touchstart', (e) => {
                 this.stickerApp.lastTouchTime = Date.now();
                 e.preventDefault();
                 e.stopPropagation();
-                onPortDown(e.touches[0]);
+                onPortDown(e, e.touches[0]);
             }, { passive: false });
 
             port.addEventListener('mouseup', (e) => {
@@ -147,8 +150,8 @@ export class Sticker {
             port.addEventListener('touchend', (e) => {
                 this.stickerApp.lastTouchTime = Date.now();
                 e.preventDefault();
-                e.stopPropagation();
-                this.stickerApp.finishConnection(this, side);
+                // На тач touchend приходит на исходный порт, поэтому не завершаем
+                // связь здесь: window.touchend определит конечный порт по координатам.
             }, { passive: false });
 
             port.addEventListener('mouseenter', () => port.classList.add('active'));
@@ -232,22 +235,24 @@ export class Sticker {
 
         // Mouse Down logic for moving
         const onDown = (e) => {
-            if (e.button !== undefined && e.button !== 0) return;
+            const point = (e.touches && e.touches[0]) ? e.touches[0] : e;
+            const target = e.target || point.target;
+            if (point.button !== undefined && point.button !== 0) return;
             if (this.canvasState.activeTool !== 'select' || this.canvasState.editingAnnotationsLayerId) return;
-            if (e.target.classList.contains('port') || e.target.closest('.resize-handle') || e.target.tagName === 'INPUT') return;
+            if (target.classList.contains('port') || target.closest('.resize-handle') || target.tagName === 'INPUT') return;
             if (this.isEditing) {
                 e.stopPropagation();
                 return;
             }
             e.preventDefault(); // Prevent text selection/native drag
             this.stickerApp.selectSticker(this);
-            this.stickerApp.startDrag(this, e);
+            this.stickerApp.startDrag(this, point);
         };
 
         el.addEventListener('mousedown', onDown);
         el.addEventListener('touchstart', (e) => {
-            onDown(e.touches[0]);
-        }, { passive: true });
+            onDown(e);
+        }, { passive: false });
 
         document.getElementById('stickers-layer').appendChild(el);
         return el;

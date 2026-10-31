@@ -41,6 +41,18 @@ export function createTextImage(layer, skipFonts = false, lineHeight = 1.2) {
             return;
         }
 
+        // Дожидаемся загрузки шрифтов, иначе измерение идёт по fallback-метрикам
+        // и текст "прыгает" после того, как шрифт реально подгрузится.
+        if (!skipFonts && document.fonts) {
+            try { await document.fonts.ready; } catch (e) { /* ignore */ }
+            try {
+                const primaryFamily = String(fontFamily || '').split(',')[0].replace(/['"]/g, '').trim();
+                if (primaryFamily) {
+                    await document.fonts.load(`${fontWeight || 'normal'} ${fontSize || 16}px "${primaryFamily}"`);
+                }
+            } catch (e) { /* ignore */ }
+        }
+
         const measureDiv = document.createElement('div');
         measureDiv.style.cssText = `
             width: ${width}px;

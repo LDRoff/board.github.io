@@ -359,7 +359,7 @@ export function updateFloatingToolbar(state) {
             }
 
             const fontSizeInput = document.getElementById('floatingFontSizeInput');
-            if (fontSizeInput && format.fontSize) {
+            if (fontSizeInput && format.fontSize && document.activeElement !== fontSizeInput) {
                 fontSizeInput.value = format.fontSize;
             }
 

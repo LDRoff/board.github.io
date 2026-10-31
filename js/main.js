@@ -256,7 +256,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const layer = canvasState.selectedLayers[0];
             if (layer) {
                 const fontSizeInput = document.getElementById('mobileTextFontSizeInput');
-                if (fontSizeInput) fontSizeInput.value = Math.round(layer.fontSize || 30);
+                if (fontSizeInput && document.activeElement !== fontSizeInput) {
+                    fontSizeInput.value = Math.round(layer.fontSize || 30);
+                }
 
                 const colorBtn = document.getElementById('mobileTextColorBtn');
                 if (colorBtn) {
@@ -1132,12 +1134,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         const fontSizeInput = document.getElementById('floatingFontSizeInput');
-        const applyFontSize = () => {
+        const applyFontSize = (commit = false) => {
             const size = parseInt(fontSizeInput.value, 10);
             if (!size || size < 1 || size > 1000) return;
             if (canvasState.isEditingText) {
-                // Apply to the whole layer — simple, no selection needed
-                textTool.setFontSize(size);
+                // Пока набирают число — не забираем фокус у поля ввода.
+                if (commit) {
+                    textTool.setFontSize(size);
+                } else {
+                    textTool.setFontSizeGlobal(size);
+                }
                 redraw();
                 canvasState.updateFloatingToolbar();
             } else {
@@ -1147,8 +1153,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             }
         };
-        fontSizeInput.addEventListener('input', applyFontSize);
-        fontSizeInput.addEventListener('change', applyFontSize);
+        fontSizeInput.addEventListener('input', () => applyFontSize(false));
+        fontSizeInput.addEventListener('change', () => applyFontSize(true));
+        fontSizeInput.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                fontSizeInput.blur();
+            }
+        });
         // stopPropagation prevents toolbar's e.preventDefault() from firing,
         // so the input remains focusable and typeable.
         fontSizeInput.addEventListener('mousedown', (e) => {
@@ -1286,20 +1299,33 @@ document.addEventListener('DOMContentLoaded', () => {
         // Размер шрифта
         const fontSizeInput = document.getElementById('mobileTextFontSizeInput');
         if (fontSizeInput) {
-            const applyMobileFontSize = () => {
+            const applyMobileFontSize = (commit = false) => {
                 const size = parseInt(fontSizeInput.value, 10);
                 if (!size || size < 1 || size > 1000) return;
                 if (canvasState.isEditingText) {
-                    textTool.setFontSize(size);
+                    // Пока пользователь набирает цифры, не забираем фокус у поля:
+                    // иначе мобильная клавиатура закрывается после каждого символа.
+                    if (commit) {
+                        textTool.setFontSize(size);
+                    } else {
+                        textTool.setFontSizeGlobal(size);
+                    }
                     redraw();
                     updateSubToolbarVisibility();
                 } else {
                     applyTextChange(layer => { if (layer) layer.fontSize = size; });
                 }
             };
-            fontSizeInput.addEventListener('input', applyMobileFontSize);
-            fontSizeInput.addEventListener('change', applyMobileFontSize);
+            fontSizeInput.addEventListener('input', () => applyMobileFontSize(false));
+            fontSizeInput.addEventListener('change', () => applyMobileFontSize(true));
             fontSizeInput.addEventListener('mousedown', e => e.stopPropagation());
+            fontSizeInput.addEventListener('keydown', (e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    fontSizeInput.blur();
+                }
+            });
         }
 
         // Цвет текста

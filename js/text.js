@@ -161,6 +161,15 @@ export function setFontSize(size) {
     applyRichTextProperty('fontSize', size);
 }
 
+// Меняет размер шрифта всего слоя, не забирая фокус у поля ввода.
+// Нужно для мобильного поля размера: setFontSize фокусирует редактор,
+// из-за чего клавиатура закрывалась после каждой цифры.
+export function setFontSizeGlobal(size) {
+    if (!currentEditingLayer) return;
+    currentEditingLayer.fontSize = size;
+    updateEditorStyle(currentEditingLayer);
+}
+
 export function setFontFamily(font) {
     if (!currentEditingLayer) return;
     currentEditingLayer.fontFamily = font;
