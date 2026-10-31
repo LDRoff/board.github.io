@@ -1,7 +1,7 @@
 // js/history.js
 
-import { saveStateToDB } from './persist.js?v=1.2.2';
-import { cloneLayersForAction } from './utils.js?v=1.2.2';
+import { saveStateToDB } from './persist.js?v=1.2.3';
+import { cloneLayersForAction } from './utils.js?v=1.2.3';
 
 let history = [];
 let historyIndex = -1;

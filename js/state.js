@@ -1,4 +1,4 @@
-import { TileManager } from './tileManager.js?v=1.2.2';
+import { TileManager } from './tileManager.js?v=1.2.3';
 
 export function createInitialState() {
     return {
@@ -16,6 +16,8 @@ export function createInitialState() {
         activeColor: '#000000',
         laserColor: '#ef4444',
         nonLaserColor: '#000000',
+        laserStrokes: [],
+        laserStroke: null,
         activeFillColor: 'transparent',
         activeLineWidth: 2,
         activeEraserWidth: 40,

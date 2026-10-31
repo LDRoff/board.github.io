@@ -1,4 +1,4 @@
-import { cloneLayersForAction, createTextImage } from './utils.js?v=1.2.2';
+import { cloneLayersForAction, createTextImage } from './utils.js?v=1.2.3';
 
 let editorDiv = null;
 let currentEditingLayer = null;
@@ -534,11 +534,15 @@ export function startEditing(canvasState, layer, onFinish) {
             const toolbar = document.getElementById('floating-text-toolbar');
             const mainToolbar = document.getElementById('toolbar');
             const subToolbar = document.getElementById('drawingSubToolbar');
+            const fontSheet = document.getElementById('mobile-font-sheet');
+            const fontBackdrop = document.getElementById('mobile-font-backdrop');
 
             if (editorDiv && editorDiv.contains(e.target)) return;
             if (toolbar && toolbar.contains(e.target)) return;
             if (mainToolbar && mainToolbar.contains(e.target)) return;
             if (subToolbar && subToolbar.contains(e.target)) return;
+            if (fontSheet && fontSheet.contains(e.target)) return;
+            if (fontBackdrop && fontBackdrop.contains(e.target)) return;
 
             // Consume the event so the canvas doesn't start a selectionBox
             // or any other drawing action, then finish editing.

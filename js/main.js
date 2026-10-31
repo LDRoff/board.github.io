@@ -1,19 +1,19 @@
 // --- START OF FILE js/main.js ---
 
-import { initializeCanvas } from './canvas.js?v=1.2.2';
-import { initializeToolbar } from './toolbar.js?v=1.2.2';
-import { getEditorTextarea } from './text.js?v=1.2.2';
-import { redrawCanvas, drawBackground, drawLoadingPlaceholders } from './renderer.js?v=1.2.2';
-import * as history from './history.js?v=1.2.2';
-import { initializeEventListeners, copySelectionToClipboard, pasteFromClipboard } from './events.js?v=1.2.2';
-import { initializeFileHandlers } from './file.js?v=1.2.2';
-import * as utils from './utils.js?v=1.2.2';
-import { mediaCache } from './utils.js?v=1.2.2';
-import { loadStateFromDB } from './persist.js?v=1.2.2';
-import * as textTool from './text.js?v=1.2.2';
-import { updateCursor, loadIconCursors } from './ui.js?v=1.2.2';
-import helpContent from './help-content.js?v=1.2.2';
-import { StickerApp, syncStickersWithCanvas } from './sticker.js?v=1.2.2';
+import { initializeCanvas } from './canvas.js?v=1.2.3';
+import { initializeToolbar } from './toolbar.js?v=1.2.3';
+import { getEditorTextarea } from './text.js?v=1.2.3';
+import { redrawCanvas, drawBackground, drawLoadingPlaceholders } from './renderer.js?v=1.2.3';
+import * as history from './history.js?v=1.2.3';
+import { initializeEventListeners, copySelectionToClipboard, pasteFromClipboard } from './events.js?v=1.2.3';
+import { initializeFileHandlers } from './file.js?v=1.2.3';
+import * as utils from './utils.js?v=1.2.3';
+import { mediaCache } from './utils.js?v=1.2.3';
+import { loadStateFromDB } from './persist.js?v=1.2.3';
+import * as textTool from './text.js?v=1.2.3';
+import { updateCursor, loadIconCursors } from './ui.js?v=1.2.3';
+import helpContent from './help-content.js?v=1.2.3';
+import { StickerApp, syncStickersWithCanvas } from './sticker.js?v=1.2.3';
 
 document.addEventListener('DOMContentLoaded', () => {
     // ... (без изменений до loadState) ...
@@ -627,9 +627,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const loop = () => {
             const hasLaserTool = canvasState.activeTool === 'laser';
-            const hasLaserPoints = canvasState.laserPoints && canvasState.laserPoints.length > 0;
+            const hasLaserPointer = hasLaserTool && !!canvasState.laserPointerPos;
+            const hasLaserStrokes = canvasState.laserStrokes && canvasState.laserStrokes.some(s => s.points && s.points.length > 0);
 
-            if (hasLaserTool || hasLaserPoints) {
+            if (hasLaserPointer || hasLaserStrokes) {
                 const iCanvas = canvasState.interactionCanvas;
                 const iCtx = canvasState.iCtx;
                 const dpr = window.devicePixelRatio || 1;
@@ -643,75 +644,75 @@ document.addEventListener('DOMContentLoaded', () => {
                 iCtx.scale(canvasState.zoom, canvasState.zoom);
 
                 const now = Date.now();
-                const tailDuration = 1000; // 1 second
+                const HOLD_MS = 1500;
+                const FADE_MS = 1200;
+                const MAX_AGE = HOLD_MS + FADE_MS;
 
-                // Clean up expired points
-                if (canvasState.laserPoints) {
-                    canvasState.laserPoints = canvasState.laserPoints.filter(p => now - p.time < tailDuration);
+                const alphaForTime = (time) => {
+                    const age = now - time;
+                    if (age <= HOLD_MS) return 1;
+                    return Math.max(0, 1 - (age - HOLD_MS) / FADE_MS);
+                };
+
+                // Старые штрихи не стираем сразу: даём им полежать и плавно растаять.
+                if (canvasState.laserStrokes) {
+                    canvasState.laserStrokes = canvasState.laserStrokes.filter(stroke => {
+                        stroke.points = (stroke.points || []).filter(p => now - p.time < MAX_AGE);
+                        return stroke.points.length > 0;
+                    });
                 }
 
-                // Draw tail using midpoint-based quadratic curves for smooth lines
-                if (canvasState.laserPoints && canvasState.laserPoints.length > 1) {
-                    const points = canvasState.laserPoints;
-                    iCtx.lineCap = 'butt';
+                const baseLineWidth = 6 / canvasState.zoom;
+                const laserColor = canvasState.activeColor || '#ef4444';
+
+                for (const stroke of canvasState.laserStrokes || []) {
+                    const points = stroke.points;
+                    if (!points || points.length < 2) continue;
+
+                    // Лёгкое сглаживание: убирает дрожание при быстром движении,
+                    // особенно заметное на внешней стороне поворота.
+                    const smooth = points.map((p, i) => {
+                        if (i === 0 || i === points.length - 1) return p;
+                        return {
+                            x: (points[i - 1].x + 2 * p.x + points[i + 1].x) / 4,
+                            y: (points[i - 1].y + 2 * p.y + points[i + 1].y) / 4,
+                            time: p.time
+                        };
+                    });
+
+                    iCtx.lineCap = 'round';
                     iCtx.lineJoin = 'round';
-                    iCtx.strokeStyle = canvasState.activeColor || '#ef4444';
-                    const baseLineWidth = 6 / canvasState.zoom;
+                    iCtx.strokeStyle = laserColor;
 
-                    if (points.length === 2) {
-                        const avgAge = now - (points[0].time + points[1].time) / 2;
-                        const ratio = Math.max(0, 1 - avgAge / tailDuration);
+                    for (let i = 0; i < smooth.length - 1; i++) {
+                        const p0 = smooth[i];
+                        const p1 = smooth[i + 1];
+                        const alpha = Math.min(alphaForTime(p0.time), alphaForTime(p1.time));
+                        if (alpha <= 0) continue;
+
+                        const prev = i > 0 ? smooth[i - 1] : p0;
+                        const start = { x: (prev.x + p0.x) / 2, y: (prev.y + p0.y) / 2 };
+                        const end = (i === smooth.length - 2)
+                            ? p1
+                            : { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+
+                        // Мягкое свечение под основной линией.
                         iCtx.beginPath();
-                        iCtx.moveTo(points[0].x, points[0].y);
-                        iCtx.lineTo(points[1].x, points[1].y);
-                        iCtx.lineWidth = baseLineWidth;
-                        iCtx.globalAlpha = ratio;
-                        iCtx.stroke();
-                    } else {
-                        // First segment
-                        const midStart = { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
-                        let avgAge = now - points[0].time;
-                        let ratio = Math.max(0, 1 - avgAge / tailDuration);
-                        iCtx.beginPath();
-                        iCtx.moveTo(points[0].x, points[0].y);
-                        iCtx.lineTo(midStart.x, midStart.y);
-                        iCtx.lineWidth = baseLineWidth;
-                        iCtx.globalAlpha = ratio;
+                        iCtx.moveTo(start.x, start.y);
+                        iCtx.quadraticCurveTo(p0.x, p0.y, end.x, end.y);
+                        iCtx.globalAlpha = alpha * 0.18;
+                        iCtx.lineWidth = baseLineWidth * 2.8;
                         iCtx.stroke();
 
-                        // Middle segments
-                        for (let i = 1; i < points.length - 1; i++) {
-                            const p0 = points[i - 1];
-                            const p1 = points[i];
-                            const p2 = points[i + 1];
-
-                            const mid1 = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
-                            const mid2 = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
-
-                            avgAge = now - p1.time;
-                            ratio = Math.max(0, 1 - avgAge / tailDuration);
-
-                            iCtx.beginPath();
-                            iCtx.moveTo(mid1.x, mid1.y);
-                            iCtx.quadraticCurveTo(p1.x, p1.y, mid2.x, mid2.y);
-                            iCtx.lineWidth = baseLineWidth;
-                            iCtx.globalAlpha = ratio;
-                            iCtx.stroke();
-                        }
-
-                        // Last segment
-                        const midEnd = { x: (points[points.length - 2].x + points[points.length - 1].x) / 2, y: (points[points.length - 2].y + points[points.length - 1].y) / 2 };
-                        avgAge = now - points[points.length - 1].time;
-                        ratio = Math.max(0, 1 - avgAge / tailDuration);
                         iCtx.beginPath();
-                        iCtx.moveTo(midEnd.x, midEnd.y);
-                        iCtx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+                        iCtx.moveTo(start.x, start.y);
+                        iCtx.quadraticCurveTo(p0.x, p0.y, end.x, end.y);
+                        iCtx.globalAlpha = alpha;
                         iCtx.lineWidth = baseLineWidth;
-                        iCtx.globalAlpha = ratio;
                         iCtx.stroke();
                     }
-                    iCtx.globalAlpha = 1.0;
                 }
+                iCtx.globalAlpha = 1.0;
 
                 // Draw pointer dot
                 if (canvasState.laserPointerPos && hasLaserTool) {
@@ -1279,25 +1280,93 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         // Выбор шрифта
+        const applyFontChoice = (fontName) => {
+            if (canvasState.isEditingText) {
+                textTool.setFontFamily(fontName);
+            } else {
+                applyTextChange(layer => {
+                    if (layer) {
+                        layer.fontFamily = fontName;
+                        layer.content = textTool.clearInlinePropertyFromContent(layer.content, 'fontFamily');
+                    }
+                });
+            }
+        };
+
         const fontOptions = document.getElementById('mobileTextFontOptions');
         if (fontOptions) {
             fontOptions.addEventListener('pointerup', e => {
                 const button = e.target.closest('button[data-font]');
                 if (!button) return;
-                const fontName = button.dataset.font;
-                if (canvasState.isEditingText) {
-                    textTool.setFontFamily(fontName);
-                } else {
-                    applyTextChange(layer => {
-                        if (layer) {
-                            layer.fontFamily = fontName;
-                            layer.content = textTool.clearInlinePropertyFromContent(layer.content, 'fontFamily');
-                        }
-                    });
-                }
+                applyFontChoice(button.dataset.font);
                 const fontContainer = document.getElementById('mobile-text-font-container');
                 if (fontContainer) fontContainer.classList.remove('active');
             });
+        }
+
+        // На телефоне штатный выпадающий список шрифтов оказывается слишком
+        // низким и с невидимыми подписями. Открываем отдельную понятную
+        // нижнюю панель со списком шрифтов.
+        let mobileFontSheet = null;
+        let mobileFontBackdrop = null;
+        const closeMobileFontSheet = () => {
+            if (mobileFontSheet) mobileFontSheet.style.display = 'none';
+            if (mobileFontBackdrop) mobileFontBackdrop.style.display = 'none';
+        };
+        const openMobileFontSheet = () => {
+            if (!fontOptions) return;
+            if (!mobileFontSheet) {
+                mobileFontBackdrop = document.createElement('div');
+                mobileFontBackdrop.id = 'mobile-font-backdrop';
+                mobileFontBackdrop.addEventListener('pointerdown', (e) => {
+                    e.preventDefault();
+                    closeMobileFontSheet();
+                });
+
+                mobileFontSheet = document.createElement('div');
+                mobileFontSheet.id = 'mobile-font-sheet';
+
+                const title = document.createElement('div');
+                title.className = 'mobile-font-title';
+                title.textContent = 'Выберите шрифт';
+                mobileFontSheet.appendChild(title);
+
+                fontOptions.querySelectorAll('button[data-font]').forEach(sourceBtn => {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.dataset.font = sourceBtn.dataset.font;
+                    btn.textContent = sourceBtn.textContent.trim();
+                    btn.style.fontFamily = sourceBtn.style.fontFamily;
+                    mobileFontSheet.appendChild(btn);
+                });
+
+                mobileFontSheet.addEventListener('click', (e) => {
+                    const btn = e.target.closest('button[data-font]');
+                    if (!btn) return;
+                    applyFontChoice(btn.dataset.font);
+                    closeMobileFontSheet();
+                });
+
+                document.body.appendChild(mobileFontBackdrop);
+                document.body.appendChild(mobileFontSheet);
+            }
+
+            const toolbar = document.getElementById('mobileTextSubToolbar');
+            const rect = toolbar ? toolbar.getBoundingClientRect() : { top: window.innerHeight - 120 };
+            const viewportBottom = window.innerHeight;
+            mobileFontSheet.style.bottom = `${Math.max(8, viewportBottom - rect.top + 8)}px`;
+            mobileFontSheet.style.maxHeight = `${Math.max(160, Math.min(window.innerHeight * 0.52, rect.top - 16))}px`;
+            mobileFontBackdrop.style.display = 'block';
+            mobileFontSheet.style.display = 'block';
+        };
+
+        const mobileFontBtn = document.getElementById('mobileTextFontBtn');
+        if (mobileFontBtn) {
+            mobileFontBtn.addEventListener('pointerup', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openMobileFontSheet();
+            }, { passive: false });
         }
 
         // Размер шрифта

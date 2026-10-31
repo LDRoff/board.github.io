@@ -1,10 +1,10 @@
 // --- START OF FILE js/ui.js ---
 
-import * as geo from './geometry.js?v=1.2.2';
-import * as layerManager from './layerManager.js?v=1.2.2';
-import { getSelectionRotation } from './hitTest.js?v=1.2.2';
-import { getEditorTextarea, getFormatState } from './text.js?v=1.2.2';
-import { getEraserCursorStyle } from './utils.js?v=1.2.2';
+import * as geo from './geometry.js?v=1.2.3';
+import * as layerManager from './layerManager.js?v=1.2.3';
+import { getSelectionRotation } from './hitTest.js?v=1.2.3';
+import { getEditorTextarea, getFormatState } from './text.js?v=1.2.3';
+import { getEraserCursorStyle } from './utils.js?v=1.2.3';
 
 // --- Иконки-курсоры (загружаются из webp, конвертируются в PNG для курсора) ---
 let brushCursorStyle = null;          // для обычной кисти

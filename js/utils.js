@@ -1,6 +1,6 @@
 // --- START OF FILE js/utils.js ---
 
-import { getBoundingBox, rotatePoint, getTransformedBoundingBox } from './geometry.js?v=1.2.2';
+import { getBoundingBox, rotatePoint, getTransformedBoundingBox } from './geometry.js?v=1.2.3';
 
 export const mediaCache = {};
 

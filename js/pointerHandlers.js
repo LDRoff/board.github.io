@@ -1,16 +1,16 @@
 // --- START OF FILE js/pointerHandlers.js ---
 
-import * as geo from './geometry.js?v=1.2.2';
-import * as hitTest from './hitTest.js?v=1.2.2';
-import * as actions from './actions.js?v=1.2.2';
-import * as tools from './tools.js?v=1.2.2';
-import * as utils from './utils.js?v=1.2.2';
-import * as shapeRecognizer from './shapeRecognizer.js?v=1.2.2';
-import * as textTool from './text.js?v=1.2.2';
+import * as geo from './geometry.js?v=1.2.3';
+import * as hitTest from './hitTest.js?v=1.2.3';
+import * as actions from './actions.js?v=1.2.3';
+import * as tools from './tools.js?v=1.2.3';
+import * as utils from './utils.js?v=1.2.3';
+import * as shapeRecognizer from './shapeRecognizer.js?v=1.2.3';
+import * as textTool from './text.js?v=1.2.3';
 // --- ИЗМЕНЕНИЕ: Импортируем новые функции для DOM-курсора ---
-import { updateEraserCursor, hideEraserCursor, updateCursor, showRulerSettings, syncRulerSettingsAngle, getHandCursor, getHandGrabbingCursor, getSelectCursor } from './ui.js?v=1.2.2';
+import { updateEraserCursor, hideEraserCursor, updateCursor, showRulerSettings, syncRulerSettingsAngle, getHandCursor, getHandGrabbingCursor, getSelectCursor } from './ui.js?v=1.2.3';
 // -----------------------------------------------------------
-import { drawLayer, drawSelectionBox, drawRulers } from './renderer.js?v=1.2.2';
+import { drawLayer, drawSelectionBox, drawRulers } from './renderer.js?v=1.2.3';
 
 // ... (константы и функции prepareInteractionCache, isSpenButtonPressed, checkAndHandleSpenEraser без изменений) ...
 const TOOLTIP_MESSAGES = {
@@ -867,8 +867,10 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
             // --------------------------------------
         } else if (state.activeTool === 'laser') {
             state.isDrawing = true;
-            state.laserPoints = [];
-            state.laserPoints.push({ x: finalPos.x, y: finalPos.y, time: Date.now() });
+            state.laserStrokes = state.laserStrokes || [];
+            const stroke = { points: [{ x: finalPos.x, y: finalPos.y, time: Date.now() }] };
+            state.laserStrokes.push(stroke);
+            state.laserStroke = stroke;
             state.laserPointerPos = { x: finalPos.x, y: finalPos.y };
             if (state.startLaserPointerLoop) {
                 state.startLaserPointerLoop();
@@ -925,12 +927,28 @@ export function draw(state, callbacks, e) {
     }
 
     if (state.activeTool === 'laser') {
-        const pos = utils.getMousePos(e, state);
-        state.laserPointerPos = pos;
-        if (state.isDrawing) {
-            if (!state.laserPoints) state.laserPoints = [];
-            state.laserPoints.push({ x: pos.x, y: pos.y, time: Date.now() });
+        const events = (typeof e.getCoalescedEvents === 'function') ? e.getCoalescedEvents() : null;
+        const samples = (events && events.length) ? events : [e];
+
+        for (const sample of samples) {
+            const pos = utils.getMousePos(sample, state);
+            state.laserPointerPos = pos;
+
+            if (state.isDrawing) {
+                if (!state.laserStrokes) state.laserStrokes = [];
+                if (!state.laserStroke) {
+                    state.laserStroke = { points: [] };
+                    state.laserStrokes.push(state.laserStroke);
+                }
+                const points = state.laserStroke.points;
+                const last = points[points.length - 1];
+                const minDistance = 0.5 / state.zoom;
+                if (!last || Math.hypot(pos.x - last.x, pos.y - last.y) > minDistance) {
+                    points.push({ x: pos.x, y: pos.y, time: Date.now() });
+                }
+            }
         }
+
         if (state.startLaserPointerLoop) {
             state.startLaserPointerLoop();
         }
@@ -1375,6 +1393,8 @@ export function stopDrawing(state, callbacks, e) {
 
     if (state.activeTool === 'laser') {
         state.isDrawing = false;
+        state.laserStroke = null;
+        state.laserPointerPos = null;
         // Fix: also handle panning cleanup when laser is active and user was panning
         if (state.isPanning) {
             state.isPanning = false;

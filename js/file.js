@@ -1,5 +1,5 @@
-import { processImageFile, processPdfFile, serializeLayers, getMousePos, createTextImage } from './utils.js?v=1.2.2';
-import { drawLayer } from './renderer.js?v=1.2.2';
+import { processImageFile, processPdfFile, serializeLayers, getMousePos, createTextImage } from './utils.js?v=1.2.3';
+import { drawLayer } from './renderer.js?v=1.2.3';
 
 // --- Композитинг стикеров для экспорта -------------------------------------
 // Стикеры живут в DOM (#stickers-layer), а экспорт собирается из канвасов,

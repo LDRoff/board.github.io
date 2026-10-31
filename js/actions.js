@@ -1,8 +1,8 @@
 // --- START OF FILE js/actions.js ---
 
-import { getBoundingBox, getGroupBoundingBox, rotatePoint } from './geometry.js?v=1.2.2';
-import * as hitTest from './hitTest.js?v=1.2.2';
-import { snapToGrid, getLayersInProximity, createTextImage } from './utils.js?v=1.2.2';
+import { getBoundingBox, getGroupBoundingBox, rotatePoint } from './geometry.js?v=1.2.3';
+import * as hitTest from './hitTest.js?v=1.2.3';
+import { snapToGrid, getLayersInProximity, createTextImage } from './utils.js?v=1.2.3';
 
 export function handleMove(state, pos, event) {
     let dx = pos.x - state.dragStartPos.x;

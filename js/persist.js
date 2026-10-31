@@ -13,7 +13,7 @@ let persistenceWorker = null;
 // Инициализируем Worker при загрузке модуля.
 if (window.Worker) {
     try {
-        persistenceWorker = new Worker('./js/persist-worker.js?v=1.2.2');
+        persistenceWorker = new Worker('./js/persist-worker.js?v=1.2.3');
         persistenceWorker.onerror = (e) => {
             console.error('Ошибка в Web Worker для сохранения:', e);
         };
