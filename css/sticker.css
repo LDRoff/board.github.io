@@ -215,12 +215,18 @@
 }
 
 /* Ports for connections */
+#stickers-layer {
+    --port-size: 20px;
+    --port-border: 3px;
+    --port-offset: -10px;
+}
+
 .port {
     position: absolute;
-    width: 14px;
-    height: 14px;
+    width: var(--port-size);
+    height: var(--port-size);
     background-color: #fff;
-    border: 3px solid #cbd5e1;
+    border: var(--port-border) solid #cbd5e1;
     border-radius: 50%;
     cursor: crosshair;
     opacity: 0;
@@ -241,10 +247,10 @@
     transform: scale(1.3); 
 }
 
-.port[data-side="top"] { top: -7px; left: 50%; margin-left: -7px; }
-.port[data-side="bottom"] { bottom: -7px; left: 50%; margin-left: -7px; }
-.port[data-side="left"] { left: -7px; top: 50%; margin-top: -7px; }
-.port[data-side="right"] { right: -7px; top: 50%; margin-top: -7px; }
+.port[data-side="top"] { top: var(--port-offset); left: 50%; margin-left: var(--port-offset); }
+.port[data-side="bottom"] { bottom: var(--port-offset); left: 50%; margin-left: var(--port-offset); }
+.port[data-side="left"] { left: var(--port-offset); top: 50%; margin-top: var(--port-offset); }
+.port[data-side="right"] { right: var(--port-offset); top: 50%; margin-top: var(--port-offset); }
 
 /* SVG connections layers */
 svg.connections {
@@ -361,16 +367,4 @@ path.link-insert-glow {
 /* Пока тянем связь, порты видны на всех стикерах (на тач нет hover) */
 #stickers-layer.connecting .port {
     opacity: 1;
-}
-
-/* На тач-экранах порты крупнее — иначе в них сложно попасть пальцем */
-@media (pointer: coarse) {
-    .port {
-        width: 20px;
-        height: 20px;
-    }
-    .port[data-side="top"] { top: -10px; margin-left: -10px; }
-    .port[data-side="bottom"] { bottom: -10px; margin-left: -10px; }
-    .port[data-side="left"] { left: -10px; margin-top: -10px; }
-    .port[data-side="right"] { right: -10px; margin-top: -10px; }
 }

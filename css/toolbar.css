@@ -2209,4 +2209,9 @@ body.dark-theme #floating-ruler-toolbar option {
 
 #mobile-font-sheet button:active {
     background: rgba(59, 130, 246, 0.14);
+}
+
+#mobile-font-sheet button.active {
+    background: rgba(59, 130, 246, 0.16);
+    color: var(--accent-color);
 }
