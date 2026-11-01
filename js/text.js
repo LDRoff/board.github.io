@@ -1,4 +1,4 @@
-import { cloneLayersForAction, createTextImage } from './utils.js?v=1.2.3';
+import { cloneLayersForAction, createTextImage } from './utils.js?v=1.2.5';
 
 let editorDiv = null;
 let currentEditingLayer = null;
@@ -76,18 +76,46 @@ export function getFormatState() {
 
     // Читаем состояние по вычисленным стилям узла под курсором.
     // queryCommandState больше не используем: он устарел и требует фокуса.
-    let node;
+    let node = null;
     const liveSelection = window.getSelection();
-    if (document.activeElement === editorDiv && liveSelection && liveSelection.rangeCount > 0) {
-        node = liveSelection.anchorNode;
-    } else {
-        node = savedSelectionRange.commonAncestorContainer;
+    const range = (document.activeElement === editorDiv && liveSelection && liveSelection.rangeCount > 0)
+        ? liveSelection.getRangeAt(0)
+        : savedSelectionRange;
+
+    if (range) {
+        // Для выделения берём стиль первого выделенного символа. Для свёрнутой
+        // каретки — символ перед ней: после execCommand каретка часто оказывается
+        // сразу ЗА <u>/<strike>, и тогда кнопка ошибочно гасла.
+        let container = range.startContainer;
+        let offset = range.startOffset;
+
+        if (range.collapsed) {
+            if (container.nodeType === 3) {
+                node = container.parentElement || container.parentNode;
+            } else if (container.nodeType === 1) {
+                const before = container.childNodes[Math.max(0, offset - 1)];
+                const after = container.childNodes[offset];
+                const sample = before || after;
+                node = sample
+                    ? (sample.nodeType === 3 ? sample.parentElement : sample)
+                    : container;
+            }
+        } else {
+            if (container.nodeType === 1) {
+                const child = container.childNodes[offset] || container.childNodes[Math.max(0, offset - 1)];
+                node = child ? (child.nodeType === 3 ? child.parentElement : child) : container;
+            } else {
+                node = container;
+            }
+        }
+
+        if (node && node.nodeType === 3) node = node.parentElement;
     }
-    if (node && node.nodeType === 3) node = node.parentNode;
 
     const state = {
         bold: false, italic: false, underline: false, strikeThrough: false,
         superscript: false, subscript: false,
+        bulletList: false, numberList: false,
         alignLeft: false, alignCenter: false, alignRight: false,
         fontName: null, fontSize: null, foreColor: null, backColor: null
     };
@@ -118,6 +146,14 @@ export function getFormatState() {
 
             state.superscript = computedStyle.verticalAlign === 'super';
             state.subscript = computedStyle.verticalAlign === 'sub';
+        }
+
+        if (node.closest) {
+            const list = node.closest('ul, ol');
+            if (list) {
+                state.bulletList = list.tagName === 'UL';
+                state.numberList = list.tagName === 'OL';
+            }
         }
     }
 

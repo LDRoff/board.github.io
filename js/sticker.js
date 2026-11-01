@@ -1,9 +1,9 @@
 // --- START OF FILE js/sticker.js ---
 
-import * as utils from './utils.js?v=1.2.3';
-import * as hitTest from './hitTest.js?v=1.2.3';
-import { drawLayer, drawSelectionBox } from './renderer.js?v=1.2.3';
-import { positionElement } from './ui.js?v=1.2.3';
+import * as utils from './utils.js?v=1.2.5';
+import * as hitTest from './hitTest.js?v=1.2.5';
+import { drawLayer, drawSelectionBox } from './renderer.js?v=1.2.5';
+import { positionElement } from './ui.js?v=1.2.5';
 
 export class Sticker {
     constructor(stickerApp, canvasState, layer) {
@@ -2103,6 +2103,16 @@ export function syncStickersWithCanvas(canvasState) {
         const { panX, panY, zoom } = canvasState;
         stickersLayer.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
         stickersLayer.style.transformOrigin = '0 0';
+
+        // Порты заданы в мировых координатах и масштабируются вместе со слоем.
+        // Компенсируем зум, чтобы на экране они всегда были одного размера:
+        // на телефоне крупнее (палец), на компьютере — компактнее.
+        const coarsePointer = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+        const portScreenSize = coarsePointer ? 30 : 20;
+        const portWorldSize = portScreenSize / Math.max(zoom, 0.05);
+        stickersLayer.style.setProperty('--port-size', `${portWorldSize}px`);
+        stickersLayer.style.setProperty('--port-offset', `${-portWorldSize / 2}px`);
+        stickersLayer.style.setProperty('--port-border', `${Math.max(0.5, 2.5 / Math.max(zoom, 0.05))}px`);
         
         if (canvasState.activeTool !== 'select' || canvasState.editingAnnotationsLayerId) {
             stickersLayer.classList.add('pan-mode');

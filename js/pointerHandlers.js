@@ -1,16 +1,16 @@
 // --- START OF FILE js/pointerHandlers.js ---
 
-import * as geo from './geometry.js?v=1.2.3';
-import * as hitTest from './hitTest.js?v=1.2.3';
-import * as actions from './actions.js?v=1.2.3';
-import * as tools from './tools.js?v=1.2.3';
-import * as utils from './utils.js?v=1.2.3';
-import * as shapeRecognizer from './shapeRecognizer.js?v=1.2.3';
-import * as textTool from './text.js?v=1.2.3';
+import * as geo from './geometry.js?v=1.2.5';
+import * as hitTest from './hitTest.js?v=1.2.5';
+import * as actions from './actions.js?v=1.2.5';
+import * as tools from './tools.js?v=1.2.5';
+import * as utils from './utils.js?v=1.2.5';
+import * as shapeRecognizer from './shapeRecognizer.js?v=1.2.5';
+import * as textTool from './text.js?v=1.2.5';
 // --- ИЗМЕНЕНИЕ: Импортируем новые функции для DOM-курсора ---
-import { updateEraserCursor, hideEraserCursor, updateCursor, showRulerSettings, syncRulerSettingsAngle, getHandCursor, getHandGrabbingCursor, getSelectCursor } from './ui.js?v=1.2.3';
+import { updateEraserCursor, hideEraserCursor, updateCursor, showRulerSettings, syncRulerSettingsAngle, getHandCursor, getHandGrabbingCursor, getSelectCursor } from './ui.js?v=1.2.5';
 // -----------------------------------------------------------
-import { drawLayer, drawSelectionBox, drawRulers } from './renderer.js?v=1.2.3';
+import { drawLayer, drawSelectionBox, drawRulers } from './renderer.js?v=1.2.5';
 
 // ... (константы и функции prepareInteractionCache, isSpenButtonPressed, checkAndHandleSpenEraser без изменений) ...
 const TOOLTIP_MESSAGES = {

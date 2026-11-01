@@ -1,10 +1,10 @@
 // --- START OF FILE js/ui.js ---
 
-import * as geo from './geometry.js?v=1.2.3';
-import * as layerManager from './layerManager.js?v=1.2.3';
-import { getSelectionRotation } from './hitTest.js?v=1.2.3';
-import { getEditorTextarea, getFormatState } from './text.js?v=1.2.3';
-import { getEraserCursorStyle } from './utils.js?v=1.2.3';
+import * as geo from './geometry.js?v=1.2.5';
+import * as layerManager from './layerManager.js?v=1.2.5';
+import { getSelectionRotation } from './hitTest.js?v=1.2.5';
+import { getEditorTextarea, getFormatState } from './text.js?v=1.2.5';
+import { getEraserCursorStyle } from './utils.js?v=1.2.5';
 
 // --- Иконки-курсоры (загружаются из webp, конвертируются в PNG для курсора) ---
 let brushCursorStyle = null;          // для обычной кисти
@@ -339,6 +339,30 @@ export function updateFloatingToolbar(state) {
             textToolbar.querySelector('[data-action="align-center"]').classList.toggle('active', format.alignCenter);
             textToolbar.querySelector('[data-action="align-right"]').classList.toggle('active', format.alignRight);
 
+            const alignTrigger = textToolbar.querySelector('#align-dropdown-btn');
+            if (alignTrigger) {
+                const img = alignTrigger.querySelector('img');
+                if (img) {
+                    img.src = format.alignCenter
+                        ? 'icons_bord/icon-center.webp'
+                        : format.alignRight
+                            ? 'icons_bord/icon-rightravn.webp'
+                            : 'icons_bord/icon-leftravn.webp';
+                }
+                alignTrigger.classList.add('active');
+            }
+
+            const bulletBtn = textToolbar.querySelector('[data-action="list-bullet"]');
+            if (bulletBtn) bulletBtn.classList.toggle('active', format.bulletList);
+            const numberBtn = textToolbar.querySelector('[data-action="list-number"]');
+            if (numberBtn) numberBtn.classList.toggle('active', format.numberList);
+
+            const currentFont = String(format.fontName || '').trim().toLowerCase();
+            textToolbar.querySelectorAll('#font-family-options button[data-font]').forEach(btn => {
+                const family = String(btn.dataset.font || '').split(',')[0].replace(/['"]/g, '').trim().toLowerCase();
+                btn.classList.toggle('active', !!currentFont && family === currentFont);
+            });
+
             const colorButtonSvg = textToolbar.querySelector('[data-action="pick-color"] circle');
             const colorButton = textToolbar.querySelector('[data-action="pick-color"]');
             if (format.foreColor) {
@@ -432,7 +456,7 @@ export function updateFloatingToolbar(state) {
         if (box) {
             const fontFamilyDisplay = document.getElementById('font-family-display');
             if (fontFamilyDisplay) {
-                const rawFont = layer.fontFamily || 'Arial';
+                const rawFont = layer.fontFamily || "'Roboto', sans-serif";
                 const cleanFontName = rawFont.split(',')[0].replace(/['"]/g, '').trim();
                 fontFamilyDisplay.textContent = cleanFontName;
             }
@@ -472,6 +496,30 @@ export function updateFloatingToolbar(state) {
             if (indexDropdownBtn) {
                 indexDropdownBtn.classList.toggle('active', isSuper || isSub);
             }
+
+            const alignTrigger = textToolbar.querySelector('#align-dropdown-btn');
+            if (alignTrigger) {
+                const img = alignTrigger.querySelector('img');
+                if (img) {
+                    img.src = layer.align === 'center'
+                        ? 'icons_bord/icon-center.webp'
+                        : layer.align === 'right'
+                            ? 'icons_bord/icon-rightravn.webp'
+                            : 'icons_bord/icon-leftravn.webp';
+                }
+                alignTrigger.classList.add('active');
+            }
+
+            const bulletBtn = textToolbar.querySelector('[data-action="list-bullet"]');
+            if (bulletBtn) bulletBtn.classList.toggle('active', /<ul[\s>]/i.test(layer.content || ''));
+            const numberBtn = textToolbar.querySelector('[data-action="list-number"]');
+            if (numberBtn) numberBtn.classList.toggle('active', /<ol[\s>]/i.test(layer.content || ''));
+
+            const currentFont = String(layer.fontFamily || '').split(',')[0].replace(/['"]/g, '').trim().toLowerCase();
+            textToolbar.querySelectorAll('#font-family-options button[data-font]').forEach(btn => {
+                const family = String(btn.dataset.font || '').split(',')[0].replace(/['"]/g, '').trim().toLowerCase();
+                btn.classList.toggle('active', !!currentFont && family === currentFont);
+            });
 
             const screenRect = {
                 left: (box.x * state.zoom) + state.panX,

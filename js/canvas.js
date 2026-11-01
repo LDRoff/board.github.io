@@ -1,13 +1,13 @@
 // js/canvas.js
 
-import { createInitialState } from './state.js?v=1.2.3';
-import * as ui from './ui.js?v=1.2.3';
-import * as touch from './touchHandlers.js?v=1.2.3';
-import * as pointer from './pointerHandlers.js?v=1.2.3';
-import { performZoom, zoomToFit } from './zoom.js?v=1.2.3';
-import * as textTool from './text.js?v=1.2.3';
-import * as utils from './utils.js?v=1.2.3';
-import * as hitTest from './hitTest.js?v=1.2.3';
+import { createInitialState } from './state.js?v=1.2.5';
+import * as ui from './ui.js?v=1.2.5';
+import * as touch from './touchHandlers.js?v=1.2.5';
+import * as pointer from './pointerHandlers.js?v=1.2.5';
+import { performZoom, zoomToFit } from './zoom.js?v=1.2.5';
+import * as textTool from './text.js?v=1.2.5';
+import * as utils from './utils.js?v=1.2.5';
+import * as hitTest from './hitTest.js?v=1.2.5';
 
 export function initializeCanvas(
     canvas,

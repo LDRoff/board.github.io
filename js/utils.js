@@ -1,6 +1,6 @@
 // --- START OF FILE js/utils.js ---
 
-import { getBoundingBox, rotatePoint, getTransformedBoundingBox } from './geometry.js?v=1.2.3';
+import { getBoundingBox, rotatePoint, getTransformedBoundingBox } from './geometry.js?v=1.2.5';
 
 export const mediaCache = {};
 
@@ -32,7 +32,58 @@ export function getEraserCursorStyle(eraserWidth, zoom, isDarkTheme) {
 /**
  * Создает HTML-изображение для текстового слоя.
  */
+const LEGACY_FONT_MAP = {
+    'arial': "'Roboto', sans-serif",
+    'helvetica': "'Roboto', sans-serif",
+    'verdana': "'Roboto', sans-serif",
+    'tahoma': "'Roboto', sans-serif",
+    'system-ui': "'Roboto', sans-serif",
+    'sans-serif': "'Roboto', sans-serif",
+    'trebuchet ms': "'Montserrat', sans-serif",
+    'georgia': "'Lora', serif",
+    'times new roman': "'Lora', serif",
+    'times': "'Lora', serif",
+    'serif': "'Lora', serif",
+    'courier new': "'Fira Code', monospace",
+    'courier': "'Fira Code', monospace",
+    'monospace': "'Fira Code', monospace",
+    'impact': "'Oswald', sans-serif",
+    'comic sans ms': "'Caveat', cursive",
+    'cursive': "'Caveat', cursive",
+};
+
+export function normalizeTextFonts(layer) {
+    if (!layer || layer.type !== 'text') return layer;
+
+    const firstFamily = (value) => String(value || '').split(',')[0].replace(/['"]/g, '').trim().toLowerCase();
+    const layerFamily = firstFamily(layer.fontFamily);
+    if (LEGACY_FONT_MAP[layerFamily]) {
+        layer.fontFamily = LEGACY_FONT_MAP[layerFamily];
+    }
+
+    if (layer.content && /font-family|<font/i.test(layer.content)) {
+        const div = document.createElement('div');
+        div.innerHTML = layer.content;
+        div.querySelectorAll('[style]').forEach(el => {
+            const family = firstFamily(el.style.fontFamily);
+            if (LEGACY_FONT_MAP[family]) {
+                el.style.fontFamily = LEGACY_FONT_MAP[family];
+            }
+        });
+        div.querySelectorAll('font[face]').forEach(el => {
+            const family = firstFamily(el.getAttribute('face'));
+            if (LEGACY_FONT_MAP[family]) {
+                el.setAttribute('face', LEGACY_FONT_MAP[family]);
+            }
+        });
+        layer.content = div.innerHTML;
+    }
+
+    return layer;
+}
+
 export function createTextImage(layer, skipFonts = false, lineHeight = 1.2) {
+    normalizeTextFonts(layer);
     window.__localFontsCssByFamily = window.__localFontsCssByFamily || {};
     return new Promise((resolve) => {
         (async () => {
@@ -423,6 +474,7 @@ export async function rehydrateLayers(layers) {
                 await new Promise(r => requestAnimationFrame(r));
             }
         } else if (layer.type === 'text') {
+            normalizeTextFonts(layer);
             if (!layer.cachedImage && layer.content) {
                 textLayersToRender.push(layer);
             }

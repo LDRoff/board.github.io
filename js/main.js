@@ -1,19 +1,19 @@
 // --- START OF FILE js/main.js ---
 
-import { initializeCanvas } from './canvas.js?v=1.2.3';
-import { initializeToolbar } from './toolbar.js?v=1.2.3';
-import { getEditorTextarea } from './text.js?v=1.2.3';
-import { redrawCanvas, drawBackground, drawLoadingPlaceholders } from './renderer.js?v=1.2.3';
-import * as history from './history.js?v=1.2.3';
-import { initializeEventListeners, copySelectionToClipboard, pasteFromClipboard } from './events.js?v=1.2.3';
-import { initializeFileHandlers } from './file.js?v=1.2.3';
-import * as utils from './utils.js?v=1.2.3';
-import { mediaCache } from './utils.js?v=1.2.3';
-import { loadStateFromDB } from './persist.js?v=1.2.3';
-import * as textTool from './text.js?v=1.2.3';
-import { updateCursor, loadIconCursors } from './ui.js?v=1.2.3';
-import helpContent from './help-content.js?v=1.2.3';
-import { StickerApp, syncStickersWithCanvas } from './sticker.js?v=1.2.3';
+import { initializeCanvas } from './canvas.js?v=1.2.5';
+import { initializeToolbar } from './toolbar.js?v=1.2.5';
+import { getEditorTextarea } from './text.js?v=1.2.5';
+import { redrawCanvas, drawBackground, drawLoadingPlaceholders } from './renderer.js?v=1.2.5';
+import * as history from './history.js?v=1.2.5';
+import { initializeEventListeners, copySelectionToClipboard, pasteFromClipboard } from './events.js?v=1.2.5';
+import { initializeFileHandlers } from './file.js?v=1.2.5';
+import * as utils from './utils.js?v=1.2.5';
+import { mediaCache } from './utils.js?v=1.2.5';
+import { loadStateFromDB } from './persist.js?v=1.2.5';
+import * as textTool from './text.js?v=1.2.5';
+import { updateCursor, loadIconCursors } from './ui.js?v=1.2.5';
+import helpContent from './help-content.js?v=1.2.5';
+import { StickerApp, syncStickersWithCanvas } from './sticker.js?v=1.2.5';
 
 document.addEventListener('DOMContentLoaded', () => {
     // ... (без изменений до loadState) ...
@@ -266,12 +266,69 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (circle) circle.setAttribute('fill', layer.color || '#000000');
                 }
 
+                const format = canvasState.isEditingText && textTool.getFormatState
+                    ? textTool.getFormatState()
+                    : null;
+                const isBold = format ? format.bold : layer.fontWeight === 'bold';
+                const isItalic = format ? format.italic : layer.fontStyle === 'italic';
+                const isUnderline = format ? format.underline : layer.textDecoration === 'underline';
+                const isStrike = format ? format.strikeThrough : layer.textDecoration === 'line-through';
+                const isSuper = format ? format.superscript : !!(layer.content && layer.content.includes('<sup'));
+                const isSub = format ? format.subscript : !!(layer.content && layer.content.includes('<sub'));
+
                 const boldBtn = document.getElementById('mobileTextBold');
-                if (boldBtn) boldBtn.classList.toggle('active', layer.fontWeight === 'bold');
+                if (boldBtn) boldBtn.classList.toggle('active', isBold);
                 const italicBtn = document.getElementById('mobileTextItalic');
-                if (italicBtn) italicBtn.classList.toggle('active', layer.fontStyle === 'italic');
+                if (italicBtn) italicBtn.classList.toggle('active', isItalic);
                 const underlineBtn = document.getElementById('mobileTextUnderline');
-                if (underlineBtn) underlineBtn.classList.toggle('active', layer.textDecoration === 'underline');
+                if (underlineBtn) underlineBtn.classList.toggle('active', isUnderline);
+                const strikeBtn = document.getElementById('mobileTextStrike');
+                if (strikeBtn) strikeBtn.classList.toggle('active', isStrike);
+                const superBtn = document.getElementById('mobileTextSuperscript');
+                if (superBtn) superBtn.classList.toggle('active', isSuper);
+                const subBtn = document.getElementById('mobileTextSubscript');
+                if (subBtn) subBtn.classList.toggle('active', isSub);
+
+                const styleBtn = document.getElementById('mobileTextStyleBtn');
+                if (styleBtn) {
+                    styleBtn.classList.toggle('active', isBold || isItalic || isUnderline || isStrike);
+                }
+                const indexBtn = document.getElementById('mobileTextIndexBtn');
+                if (indexBtn) {
+                    indexBtn.classList.toggle('active', isSuper || isSub);
+                }
+
+                const align = format
+                    ? (format.alignCenter ? 'center' : format.alignRight ? 'right' : 'left')
+                    : (layer.align || 'left');
+                const alignContainer = document.getElementById('mobile-text-align-container');
+                if (alignContainer) {
+                    alignContainer.querySelectorAll('[data-action^="align-"]').forEach(btn => {
+                        btn.classList.toggle('active', btn.dataset.action === `align-${align}`);
+                    });
+                }
+                const alignTrigger = document.getElementById('mobileTextAlignBtn');
+                if (alignTrigger) {
+                    const img = alignTrigger.querySelector('img');
+                    if (img) {
+                        img.src = align === 'center'
+                            ? 'icons_bord/icon-center.webp'
+                            : align === 'right'
+                                ? 'icons_bord/icon-rightravn.webp'
+                                : 'icons_bord/icon-leftravn.webp';
+                    }
+                    alignTrigger.classList.add('active');
+                }
+
+                const isBullet = format ? format.bulletList : /<ul[\s>]/i.test(layer.content || '');
+                const isNumber = format ? format.numberList : /<ol[\s>]/i.test(layer.content || '');
+                document.querySelectorAll('#mobileTextListOptions [data-action]').forEach(btn => {
+                    btn.classList.toggle('active',
+                        btn.dataset.action === 'list-bullet' ? isBullet :
+                        btn.dataset.action === 'list-number' ? isNumber : false);
+                });
+                const listBtn = document.getElementById('mobileTextListBtn');
+                if (listBtn) listBtn.classList.toggle('active', isBullet || isNumber);
             }
             return;
         }
@@ -1277,6 +1334,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
             });
+            // Пересчитываем подсветку кнопок: bold/strike/align/list и т.д.
+            updateSubToolbarVisibility();
         });
 
         // Выбор шрифта
@@ -1356,6 +1415,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const viewportBottom = window.innerHeight;
             mobileFontSheet.style.bottom = `${Math.max(8, viewportBottom - rect.top + 8)}px`;
             mobileFontSheet.style.maxHeight = `${Math.max(160, Math.min(window.innerHeight * 0.52, rect.top - 16))}px`;
+
+            const layer = canvasState && canvasState.selectedLayers && canvasState.selectedLayers[0];
+            const currentFamily = layer && layer.fontFamily
+                ? String(layer.fontFamily).split(',')[0].replace(/['"]/g, '').trim().toLowerCase()
+                : '';
+            mobileFontSheet.querySelectorAll('button[data-font]').forEach(btn => {
+                const family = String(btn.dataset.font || '').split(',')[0].replace(/['"]/g, '').trim().toLowerCase();
+                btn.classList.toggle('active', !!currentFamily && family === currentFamily);
+            });
+
             mobileFontBackdrop.style.display = 'block';
             mobileFontSheet.style.display = 'block';
         };

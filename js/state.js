@@ -1,4 +1,4 @@
-import { TileManager } from './tileManager.js?v=1.2.3';
+import { TileManager } from './tileManager.js?v=1.2.5';
 
 export function createInitialState() {
     return {
@@ -23,7 +23,7 @@ export function createInitialState() {
         activeEraserWidth: 40,
         activeLineStyle: 'solid',
         activeTextColor: '#000000',
-        activeFontFamily: 'Arial',
+        activeFontFamily: "'Roboto', sans-serif",
         activeFontSize: 30,
         activeFontWeight: 'normal',
         activeFontStyle: 'normal',

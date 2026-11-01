@@ -1,9 +1,9 @@
 // --- START OF FILE js/renderer.js ---
 
-import { getBoundingBox, getGroupBoundingBox, getGroupLogicalBoundingBox, rotatePoint, getTransformedBoundingBox, doBoxesIntersect, getRotationCenter } from './geometry.js?v=1.2.3';
-import { getSelectionRotation } from './hitTest.js?v=1.2.3';
-import { buildSpatialGrid, createTextImage } from './utils.js?v=1.2.3';
-import { getActiveRulerForSettings } from './ui.js?v=1.2.3';
+import { getBoundingBox, getGroupBoundingBox, getGroupLogicalBoundingBox, rotatePoint, getTransformedBoundingBox, doBoxesIntersect, getRotationCenter } from './geometry.js?v=1.2.5';
+import { getSelectionRotation } from './hitTest.js?v=1.2.5';
+import { buildSpatialGrid, createTextImage } from './utils.js?v=1.2.5';
+import { getActiveRulerForSettings } from './ui.js?v=1.2.5';
 
 // --- PDF navigation icon cache ---
 const _pdfNavIcons = { prev: null, next: null };
@@ -966,7 +966,7 @@ export function drawLayer(ctx, layer, canvasState) {
 
             const fontWeight = layer.fontWeight || 'normal';
             const fontStyle = layer.fontStyle || 'normal';
-            ctx.font = `${fontStyle} ${fontWeight} ${layer.fontSize}px ${layer.fontFamily || 'Arial'}`;
+            ctx.font = `${fontStyle} ${fontWeight} ${layer.fontSize}px ${layer.fontFamily || "'Roboto', sans-serif"}`;
             ctx.textBaseline = 'top';
             ctx.textAlign = layer.align || 'left';
             ctx.fillStyle = layer.color;
