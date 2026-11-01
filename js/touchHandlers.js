@@ -1,6 +1,6 @@
 // js/touchHandlers.js
-import { hideEraserCursor } from './ui.js?v=1.2.5';
-import * as utils from './utils.js?v=1.2.5';
+import { hideEraserCursor } from './ui.js?v=1.2.6';
+import * as utils from './utils.js?v=1.2.6';
 
 export function handleTouchStart(state, callbacks, e) {
     if (e.touches.length === 2) {

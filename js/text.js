@@ -1,4 +1,4 @@
-import { cloneLayersForAction, createTextImage } from './utils.js?v=1.2.5';
+import { cloneLayersForAction, createTextImage } from './utils.js?v=1.2.6';
 
 let editorDiv = null;
 let currentEditingLayer = null;

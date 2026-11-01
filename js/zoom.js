@@ -1,6 +1,6 @@
 // js/zoom.js
-import * as utils from './utils.js?v=1.2.5';
-import { getTransformedBoundingBox } from './geometry.js?v=1.2.5';
+import * as utils from './utils.js?v=1.2.6';
+import { getTransformedBoundingBox } from './geometry.js?v=1.2.6';
 
 export function performZoom(state, callbacks, direction, zoomCenter) {
     const { redrawCallback, saveViewStateCallback } = callbacks;

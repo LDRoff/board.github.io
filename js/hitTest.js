@@ -1,8 +1,8 @@
 // --- START OF FILE js/hitTest.js ---
 
-import * as geo from './geometry.js?v=1.2.5';
-import { getLayersInProximity } from './utils.js?v=1.2.5';
-import { getActiveRulerForSettings } from './ui.js?v=1.2.5';
+import * as geo from './geometry.js?v=1.2.6';
+import { getLayersInProximity } from './utils.js?v=1.2.6';
+import { getActiveRulerForSettings } from './ui.js?v=1.2.6';
 
 // ... (getLayerAtPosition, getSelectionRotation, getHandleAtPosition без изменений) ...
 

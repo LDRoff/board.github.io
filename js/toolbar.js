@@ -1,9 +1,9 @@
 // --- START OF FILE js/toolbar.js ---
 
-import { pasteFromClipboard } from './events.js?v=1.2.5';
-import * as utils from './utils.js?v=1.2.5';
-import * as geo from './geometry.js?v=1.2.5';
-import { updateCursor, getHandCursor } from './ui.js?v=1.2.5';
+import { pasteFromClipboard } from './events.js?v=1.2.6';
+import * as utils from './utils.js?v=1.2.6';
+import * as geo from './geometry.js?v=1.2.6';
+import { updateCursor, getHandCursor } from './ui.js?v=1.2.6';
 
 export function initializeToolbar(canvasState, redrawCallback, updateToolbarCallback, handlers) {
     const toolbarWrapper = document.getElementById('toolbarWrapper');

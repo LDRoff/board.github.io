@@ -1,4 +1,4 @@
-import { TileManager } from './tileManager.js?v=1.2.5';
+import { TileManager } from './tileManager.js?v=1.2.6';
 
 export function createInitialState() {
     return {

@@ -1,9 +1,9 @@
 // --- START OF FILE js/sticker.js ---
 
-import * as utils from './utils.js?v=1.2.5';
-import * as hitTest from './hitTest.js?v=1.2.5';
-import { drawLayer, drawSelectionBox } from './renderer.js?v=1.2.5';
-import { positionElement } from './ui.js?v=1.2.5';
+import * as utils from './utils.js?v=1.2.6';
+import * as hitTest from './hitTest.js?v=1.2.6';
+import { drawLayer, drawSelectionBox } from './renderer.js?v=1.2.6';
+import { positionElement } from './ui.js?v=1.2.6';
 
 export class Sticker {
     constructor(stickerApp, canvasState, layer) {
@@ -1547,8 +1547,10 @@ export class StickerApp {
         };
 
         try {
-            // Guard: ignore simulated mouse events from touch
-            if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) {
+            // Guard: ignore only simulated mouse events from touch.
+            // У TouchEvent тоже может быть sourceCapabilities, поэтому проверяем тип:
+            // иначе настоящий touchend ошибочно считался «синтетическим mouseup».
+            if (e.type === 'mouseup' && e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) {
                 cleanupAllStates();
                 return;
             }
@@ -1622,23 +1624,37 @@ export class StickerApp {
                 }
                 
                 if (clientX !== undefined && clientY !== undefined) {
+                    const worldX = (clientX - this.canvasState.panX) / this.canvasState.zoom;
+                    const worldY = (clientY - this.canvasState.panY) / this.canvasState.zoom;
                     const element = document.elementFromPoint(clientX, clientY);
                     const portEl = element && element.closest ? element.closest('.port') : null;
                     const cardEl = element && element.closest ? element.closest('.sticker-card') : null;
+                    let destSticker = null;
+                    let side = null;
+
                     if (cardEl) {
-                        const destSticker = this.stickers.find(s => String(s.id) === String(cardEl.id));
-                        if (destSticker && destSticker !== this.connectionState.from) {
-                            // На тач палец редко попадает точно в 14-пиксельный порт:
-                            // если отпустили на карточке — цепляем к ближайшей стороне.
-                            let side = portEl ? portEl.dataset.side : null;
-                            if (!side) {
-                                const worldX = (clientX - this.canvasState.panX) / this.canvasState.zoom;
-                                const worldY = (clientY - this.canvasState.panY) / this.canvasState.zoom;
-                                side = this.getClosestPortSide(destSticker, worldX, worldY);
+                        destSticker = this.stickers.find(s => String(s.id) === String(cardEl.id)) || null;
+                        side = portEl ? portEl.dataset.side : null;
+                    } else {
+                        // Если палец отпущен чуть мимо карточки — ищем ближайший
+                        // стикер в радиусе 40 экранных пикселей.
+                        let bestDist = Infinity;
+                        this.stickers.forEach(s => {
+                            const dx = Math.max(s.x - worldX, 0, worldX - (s.x + s.w));
+                            const dy = Math.max(s.y - worldY, 0, worldY - (s.y + s.h));
+                            const dist = Math.hypot(dx, dy);
+                            if (dist < 40 / this.canvasState.zoom && dist < bestDist) {
+                                bestDist = dist;
+                                destSticker = s;
                             }
-                            this.finishConnection(destSticker, side);
-                            return; // finishConnection handles cleanup + renderLinks
-                        }
+                        });
+                    }
+
+                    if (destSticker && destSticker !== this.connectionState.from) {
+                        // Если отпустили не точно в порт — цепляем к ближайшей стороне.
+                        if (!side) side = this.getClosestPortSide(destSticker, worldX, worldY);
+                        this.finishConnection(destSticker, side);
+                        return; // finishConnection handles cleanup + renderLinks
                     }
                 }
                 this.connectionState = null;
@@ -2105,14 +2121,28 @@ export function syncStickersWithCanvas(canvasState) {
         stickersLayer.style.transformOrigin = '0 0';
 
         // Порты заданы в мировых координатах и масштабируются вместе со слоем.
-        // Компенсируем зум, чтобы на экране они всегда были одного размера:
-        // на телефоне крупнее (палец), на компьютере — компактнее.
+        // Компенсируем зум, чтобы на экране они были одного размера, но не
+        // раздувались больше самой карточки при сильном отдалении.
         const coarsePointer = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
-        const portScreenSize = coarsePointer ? 30 : 20;
-        const portWorldSize = portScreenSize / Math.max(zoom, 0.05);
+        const portScreenSize = coarsePointer ? 20 : 16;
+        const safeZoom = Math.max(zoom, 0.05);
+        const portWorldSize = portScreenSize / safeZoom;
         stickersLayer.style.setProperty('--port-size', `${portWorldSize}px`);
         stickersLayer.style.setProperty('--port-offset', `${-portWorldSize / 2}px`);
-        stickersLayer.style.setProperty('--port-border', `${Math.max(0.5, 2.5 / Math.max(zoom, 0.05))}px`);
+        stickersLayer.style.setProperty('--port-border', `${Math.max(0.5, 2 / safeZoom)}px`);
+
+        const app = window.stickerApp;
+        if (app && Array.isArray(app.stickers)) {
+            app.stickers.forEach(s => {
+                if (!s.element) return;
+                const cardScreenSize = Math.min(s.w || 0, s.h || 0) * zoom;
+                const screenSize = Math.max(12, Math.min(portScreenSize, cardScreenSize * 0.4));
+                const worldSize = screenSize / safeZoom;
+                s.element.style.setProperty('--port-size', `${worldSize}px`);
+                s.element.style.setProperty('--port-offset', `${-worldSize / 2}px`);
+                s.element.style.setProperty('--port-border', `${Math.max(0.5, 2 / safeZoom)}px`);
+            });
+        }
         
         if (canvasState.activeTool !== 'select' || canvasState.editingAnnotationsLayerId) {
             stickersLayer.classList.add('pan-mode');

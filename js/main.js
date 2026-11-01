@@ -1,19 +1,19 @@
 // --- START OF FILE js/main.js ---
 
-import { initializeCanvas } from './canvas.js?v=1.2.5';
-import { initializeToolbar } from './toolbar.js?v=1.2.5';
-import { getEditorTextarea } from './text.js?v=1.2.5';
-import { redrawCanvas, drawBackground, drawLoadingPlaceholders } from './renderer.js?v=1.2.5';
-import * as history from './history.js?v=1.2.5';
-import { initializeEventListeners, copySelectionToClipboard, pasteFromClipboard } from './events.js?v=1.2.5';
-import { initializeFileHandlers } from './file.js?v=1.2.5';
-import * as utils from './utils.js?v=1.2.5';
-import { mediaCache } from './utils.js?v=1.2.5';
-import { loadStateFromDB } from './persist.js?v=1.2.5';
-import * as textTool from './text.js?v=1.2.5';
-import { updateCursor, loadIconCursors } from './ui.js?v=1.2.5';
-import helpContent from './help-content.js?v=1.2.5';
-import { StickerApp, syncStickersWithCanvas } from './sticker.js?v=1.2.5';
+import { initializeCanvas } from './canvas.js?v=1.2.6';
+import { initializeToolbar } from './toolbar.js?v=1.2.6';
+import { getEditorTextarea } from './text.js?v=1.2.6';
+import { redrawCanvas, drawBackground, drawLoadingPlaceholders } from './renderer.js?v=1.2.6';
+import * as history from './history.js?v=1.2.6';
+import { initializeEventListeners, copySelectionToClipboard, pasteFromClipboard } from './events.js?v=1.2.6';
+import { initializeFileHandlers } from './file.js?v=1.2.6';
+import * as utils from './utils.js?v=1.2.6';
+import { mediaCache } from './utils.js?v=1.2.6';
+import { loadStateFromDB } from './persist.js?v=1.2.6';
+import * as textTool from './text.js?v=1.2.6';
+import { updateCursor, loadIconCursors } from './ui.js?v=1.2.6';
+import helpContent from './help-content.js?v=1.2.6';
+import { StickerApp, syncStickersWithCanvas } from './sticker.js?v=1.2.6';
 
 document.addEventListener('DOMContentLoaded', () => {
     // ... (без изменений до loadState) ...
@@ -701,8 +701,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 iCtx.scale(canvasState.zoom, canvasState.zoom);
 
                 const now = Date.now();
-                const HOLD_MS = 1500;
-                const FADE_MS = 1200;
+                const HOLD_MS = 800;
+                const FADE_MS = 500;
                 const MAX_AGE = HOLD_MS + FADE_MS;
 
                 const alphaForTime = (time) => {
@@ -719,7 +719,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                 }
 
-                const baseLineWidth = 6 / canvasState.zoom;
+                const baseLineWidth = 2.5 / canvasState.zoom;
                 const laserColor = canvasState.activeColor || '#ef4444';
 
                 for (const stroke of canvasState.laserStrokes || []) {
@@ -757,8 +757,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         iCtx.beginPath();
                         iCtx.moveTo(start.x, start.y);
                         iCtx.quadraticCurveTo(p0.x, p0.y, end.x, end.y);
-                        iCtx.globalAlpha = alpha * 0.18;
-                        iCtx.lineWidth = baseLineWidth * 2.8;
+                        iCtx.globalAlpha = alpha * 0.10;
+                        iCtx.lineWidth = baseLineWidth * 1.8;
                         iCtx.stroke();
 
                         iCtx.beginPath();
@@ -773,8 +773,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // Draw pointer dot
                 if (canvasState.laserPointerPos && hasLaserTool) {
-                    const radius = 5 / canvasState.zoom;
-                    const glowRadius = 8 / canvasState.zoom;
+                    const radius = 4 / canvasState.zoom;
+                    const glowRadius = 6 / canvasState.zoom;
 
                     iCtx.beginPath();
                     iCtx.arc(canvasState.laserPointerPos.x, canvasState.laserPointerPos.y, radius, 0, Math.PI * 2);

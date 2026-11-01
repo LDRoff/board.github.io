@@ -1,9 +1,9 @@
 // --- START OF FILE js/renderer.js ---
 
-import { getBoundingBox, getGroupBoundingBox, getGroupLogicalBoundingBox, rotatePoint, getTransformedBoundingBox, doBoxesIntersect, getRotationCenter } from './geometry.js?v=1.2.5';
-import { getSelectionRotation } from './hitTest.js?v=1.2.5';
-import { buildSpatialGrid, createTextImage } from './utils.js?v=1.2.5';
-import { getActiveRulerForSettings } from './ui.js?v=1.2.5';
+import { getBoundingBox, getGroupBoundingBox, getGroupLogicalBoundingBox, rotatePoint, getTransformedBoundingBox, doBoxesIntersect, getRotationCenter } from './geometry.js?v=1.2.6';
+import { getSelectionRotation } from './hitTest.js?v=1.2.6';
+import { buildSpatialGrid, createTextImage } from './utils.js?v=1.2.6';
+import { getActiveRulerForSettings } from './ui.js?v=1.2.6';
 
 // --- PDF navigation icon cache ---
 const _pdfNavIcons = { prev: null, next: null };

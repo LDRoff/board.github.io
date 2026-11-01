@@ -1,9 +1,9 @@
-import { getEditorTextarea } from './text.js?v=1.2.5';
-import { getGroupBoundingBox } from './geometry.js?v=1.2.5';
-import * as geo from './geometry.js?v=1.2.5';
-import { drawLayer } from './renderer.js?v=1.2.5';
-import * as utils from './utils.js?v=1.2.5';
-import { updateCursor } from './ui.js?v=1.2.5';
+import { getEditorTextarea } from './text.js?v=1.2.6';
+import { getGroupBoundingBox } from './geometry.js?v=1.2.6';
+import * as geo from './geometry.js?v=1.2.6';
+import { drawLayer } from './renderer.js?v=1.2.6';
+import * as utils from './utils.js?v=1.2.6';
+import { updateCursor } from './ui.js?v=1.2.6';
 
 const shapes2DOrder = ['rect', 'ellipse', 'line', 'curve', 'parallelogram', 'triangle', 'trapezoid', 'rhombus'];
 const shapes3DOrder = ['sphere', 'cone', 'parallelepiped', 'pyramid', 'frustum', 'truncated-pyramid', 'truncated-sphere'];

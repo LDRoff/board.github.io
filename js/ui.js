@@ -1,10 +1,10 @@
 // --- START OF FILE js/ui.js ---
 
-import * as geo from './geometry.js?v=1.2.5';
-import * as layerManager from './layerManager.js?v=1.2.5';
-import { getSelectionRotation } from './hitTest.js?v=1.2.5';
-import { getEditorTextarea, getFormatState } from './text.js?v=1.2.5';
-import { getEraserCursorStyle } from './utils.js?v=1.2.5';
+import * as geo from './geometry.js?v=1.2.6';
+import * as layerManager from './layerManager.js?v=1.2.6';
+import { getSelectionRotation } from './hitTest.js?v=1.2.6';
+import { getEditorTextarea, getFormatState } from './text.js?v=1.2.6';
+import { getEraserCursorStyle } from './utils.js?v=1.2.6';
 
 // --- Иконки-курсоры (загружаются из webp, конвертируются в PNG для курсора) ---
 let brushCursorStyle = null;          // для обычной кисти
@@ -1027,3 +1027,75 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 // --- END OF FILE js/ui.js ---
+
+// Универсальная подгонка выпадающих списков под экран: меню у края окна
+// раньше могли уходить за границы, особенно на планшете.
+export function clampOverlayToViewport(menu) {
+    if (!menu) return;
+    const margin = 8;
+    menu.style.translate = '0px 0px';
+    menu.style.marginLeft = '0px';
+    menu.style.marginTop = '0px';
+
+    let rect = menu.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+
+    if (rect.width > window.innerWidth - margin * 2) {
+        menu.style.maxWidth = `${window.innerWidth - margin * 2}px`;
+        menu.style.overflowX = 'hidden';
+        rect = menu.getBoundingClientRect();
+    }
+    if (rect.height > window.innerHeight - margin * 2) {
+        menu.style.maxHeight = `${window.innerHeight - margin * 2}px`;
+        menu.style.overflowY = 'auto';
+        rect = menu.getBoundingClientRect();
+    }
+
+    let dx = 0;
+    let dy = 0;
+    if (rect.left < margin) dx = margin - rect.left;
+    if (rect.right > window.innerWidth - margin) dx = window.innerWidth - margin - rect.right;
+    if (rect.top < margin) dy = margin - rect.top;
+    if (rect.bottom > window.innerHeight - margin) dy = window.innerHeight - margin - rect.bottom;
+
+    if (dx || dy) {
+        if ('translate' in menu.style) {
+            menu.style.translate = `${dx}px ${dy}px`;
+        } else {
+            menu.style.marginLeft = `${dx}px`;
+            menu.style.marginTop = `${dy}px`;
+        }
+    }
+}
+
+function clampDropdownAfterOpen(event) {
+    const trigger = event.target && event.target.closest
+        ? event.target.closest('button, .dropdown-header')
+        : null;
+    if (!trigger) return;
+
+    const container = trigger.closest('.dropdown-container, .tool-container, .custom-dropdown, .color-picker-wrapper');
+    if (!container) return;
+
+    const menu = container.querySelector('.dropdown-options, .tool-options, .sub-toolbar-dropdown, .dropdown-list, .floating-palette');
+    if (!menu || menu.contains(trigger)) return;
+
+    setTimeout(() => {
+        const style = window.getComputedStyle(menu);
+        if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity || '1') === 0) return;
+        clampOverlayToViewport(menu);
+    }, 30);
+}
+
+if (typeof document !== 'undefined') {
+    document.addEventListener('pointerup', clampDropdownAfterOpen, true);
+    document.addEventListener('click', clampDropdownAfterOpen, true);
+    window.addEventListener('resize', () => {
+        document.querySelectorAll('.dropdown-options, .tool-options, .sub-toolbar-dropdown, .dropdown-list, .floating-palette').forEach(menu => {
+            const style = window.getComputedStyle(menu);
+            if (style.display !== 'none' && style.visibility !== 'hidden' && parseFloat(style.opacity || '1') > 0) {
+                clampOverlayToViewport(menu);
+            }
+        });
+    });
+}
