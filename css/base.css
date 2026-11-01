@@ -46,7 +46,7 @@ canvas {
 }
 
 #interactionCanvas { 
-    z-index: 3; 
+    z-index: 30; 
     background-color: transparent; 
     touch-action: none; 
     pointer-events: none; 

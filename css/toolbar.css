@@ -2214,4 +2214,17 @@ body.dark-theme #floating-ruler-toolbar option {
 #mobile-font-sheet button.active {
     background: rgba(59, 130, 246, 0.16);
     color: var(--accent-color);
+}
+
+/* Страховка от выхода меню за экран до JS-подгонки */
+.dropdown-options,
+.tool-options,
+.sub-toolbar-dropdown,
+.dropdown-list,
+.floating-palette {
+    max-width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    box-sizing: border-box;
 }
