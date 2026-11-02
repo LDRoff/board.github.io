@@ -46,10 +46,17 @@ canvas {
 }
 
 #interactionCanvas { 
-    z-index: 30; 
+    z-index: 3; 
     background-color: transparent; 
     touch-action: none; 
     pointer-events: none; 
+}
+
+#overlayCanvas {
+    z-index: 30;
+    background-color: transparent;
+    touch-action: none;
+    pointer-events: none;
 }
 
 body.dark-theme #backgroundCanvas { background-color: #2c3e50; }

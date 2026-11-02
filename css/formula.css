@@ -1,0 +1,846 @@
+/* --- START OF FILE css/formula.css --- */
+/* Формулы и графики: окно ввода, клавиатура, карточка графика. */
+
+/* ---------------------------------------------------------- окно формулы */
+
+#math-modal .math-modal {
+    width: min(760px, calc(100vw - 24px));
+    max-height: min(92vh, 880px);
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-modal);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+    border-radius: 22px;
+    box-shadow: var(--shadow-modal);
+    overflow: hidden;
+    transform: scale(0.96);
+    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#math-modal:not(.hidden) .math-modal {
+    transform: scale(1);
+}
+
+.math-modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-modal-glass);
+}
+
+.math-modal-head h3 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.math-modal-head .modal-close {
+    font-size: 22px;
+    line-height: 1;
+}
+
+.math-modal-body {
+    padding: 14px 18px 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+/* Поле ввода: здесь и живёт «двухмерная» формула с курсором. */
+.math-editor-host {
+    position: relative;
+    min-height: 92px;
+    max-height: 40vh;
+    overflow: auto;
+    padding: 14px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    background: var(--input-bg);
+    font-size: 34px;
+    line-height: 1.55;
+    white-space: nowrap;
+}
+
+.math-editor-host [data-row] {
+    outline: none;
+    min-width: 3px;
+    caret-color: var(--accent-color);
+}
+
+.math-editor-host [data-row]:empty::after {
+    content: '\200b';
+}
+
+.math-editor-host.is-empty::after {
+    content: 'Например: x² − 5x + 6 = 0';
+    position: absolute;
+    left: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-family: 'Roboto', sans-serif;
+    font-size: 15px;
+    color: var(--text-muted);
+    pointer-events: none;
+    opacity: 0.85;
+}
+
+/* --------------------------------------------------------------- клавиатура */
+
+.math-keypad {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    border-radius: 16px;
+    background: #eef2f8;
+}
+
+/* Переключатель вкладок — сегментированный контрол. */
+.math-keypad-tabs {
+    display: flex;
+    gap: 3px;
+    padding: 3px;
+    border-radius: 11px;
+    background: rgba(15, 23, 42, 0.06);
+}
+
+.math-tab {
+    flex: 1 1 0;
+    padding: 8px 6px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.math-tab:hover {
+    color: var(--text-main);
+}
+
+.math-tab.active {
+    background: #ffffff;
+    color: var(--accent-color);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.14);
+}
+
+.math-keypad-caption {
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: #64748b;
+    margin: 0 2px -2px;
+}
+
+.math-keypad-grid {
+    display: grid;
+    gap: 7px;
+}
+
+/* Быстрый ряд структур — всегда на виду. */
+.math-keypad-quick {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 7px;
+}
+
+.math-key-quick {
+    height: 40px;
+    background: #dbe7fb;
+    color: #1e3a8a;
+    font-family: 'Cambria Math', 'Times New Roman', serif;
+    font-size: 17px;
+    box-shadow: none;
+}
+
+.math-key-quick:hover {
+    background: #cbdcf8;
+    transform: none;
+}
+
+/* Клавиши: мягкие «плитки» без рамок. */
+.math-key {
+    min-width: 0;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 12px;
+    background: #ffffff;
+    color: #0f172a;
+    font-size: 19px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+    transition: transform 0.08s ease, box-shadow 0.12s ease, background-color 0.12s ease;
+    padding: 0 4px;
+    white-space: nowrap;
+}
+
+.math-key:hover {
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.14);
+    transform: translateY(-1px);
+}
+
+.math-key:active {
+    transform: scale(0.95);
+    box-shadow: none;
+    background: var(--accent-color);
+    color: #fff;
+}
+
+/* Цифры — самые крупные. */
+.math-key-num {
+    font-size: 21px;
+    font-weight: 600;
+}
+
+/* Операторы — голубые, чтобы отличались от цифр. */
+.math-key-op {
+    background: #e2ebfb;
+    color: #1d4ed8;
+    font-size: 20px;
+}
+
+.math-key-op:hover {
+    background: #d3e0fa;
+}
+
+/* Функции и символы — математическим шрифтом. */
+.math-key-fn {
+    font-family: 'Cambria Math', 'Times New Roman', serif;
+    font-size: 18px;
+    color: #1e293b;
+}
+
+.math-key-var {
+    font-family: 'Cambria Math', 'Times New Roman', serif;
+    font-style: italic;
+    font-size: 20px;
+    background: #e8f0ff;
+    color: #1e3a8a;
+}
+
+.math-key-action {
+    background: #e7ebf2;
+    color: #475569;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: none;
+}
+
+.math-key-action:hover {
+    background: #dde3ec;
+    transform: none;
+}
+
+/* Кнопка стирания — красная, чтобы её было видно сразу. */
+.math-key-del {
+    background: #fee2e2;
+    color: #dc2626;
+    font-size: 18px;
+}
+
+.math-key-del:hover {
+    background: #fecaca;
+}
+
+/* Кнопки перемещения курсора — заметно отличаются от остальных клавиш. */
+.math-key-nav {
+    background: #e9e5ff;
+    color: #5b21b6;
+    font-size: 21px;
+    font-weight: 600;
+    box-shadow: inset 0 0 0 1.5px rgba(91, 33, 182, 0.18);
+}
+
+.math-key-nav:hover {
+    background: #ded6ff;
+}
+
+body.dark-theme .math-key-nav {
+    background: #2c2544;
+    color: #c4b5fd;
+    box-shadow: inset 0 0 0 1.5px rgba(196, 181, 253, 0.22);
+}
+
+body.dark-theme .math-key-nav:hover {
+    background: #3a3159;
+}
+
+/* Верхние и нижние индексы в подписях клавиш (x², x₁).
+   Кнопка — flex-контейнер, поэтому подпись оборачиваем в свой inline-блок,
+   иначе vertical-align у sup не работает и степень «висит» по центру. */
+.math-key .k-label {
+    display: inline-block;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.math-key sup {
+    display: inline-block;
+    font-size: 0.72em;
+    line-height: 1;
+    vertical-align: 0.62em;
+    margin-left: 0.02em;
+}
+
+.math-key sub {
+    display: inline-block;
+    font-size: 0.72em;
+    line-height: 1;
+    vertical-align: -0.28em;
+    margin-left: 0.02em;
+}
+
+/* Кнопка «системная клавиатура» — только на сенсорных экранах. */
+/* Подсвечиваем только активную часть формулы, а не всю формулу целиком. */
+.math-editor-host [data-row]:focus {
+    outline: none;
+}
+
+.math-editor-host [data-slot].is-active-row,
+.math-editor-host [data-slot]:focus {
+    background: rgba(37, 99, 235, 0.12);
+    border-radius: 4px;
+}
+
+body.dark-theme .math-editor-host [data-slot].is-active-row,
+body.dark-theme .math-editor-host [data-slot]:focus {
+    background: rgba(147, 197, 253, 0.16);
+}
+
+.math-kb-btn {
+    flex: 0 0 auto;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-element);
+    color: var(--text-main);
+    font-size: 17px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.math-kb-btn.active {
+    background: var(--accent-color);
+    border-color: transparent;
+    color: #fff;
+}
+
+/* ------------------------------------------------------------------ подвал */
+
+.math-modal-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 12px 18px;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-modal-glass);
+}
+
+.math-hint {
+    flex: 1 1 220px;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    transition: color 0.2s ease;
+}
+
+.math-hint-error {
+    color: #ef4444;
+    font-weight: 600;
+}
+
+.math-modal-actions {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.math-modal-actions .btn {
+    padding: 9px 18px;
+    font-size: 14px;
+}
+
+/* ------------------------------------------------ формула внутри текста */
+
+.rep-math {
+    display: inline-block;
+    vertical-align: middle;
+    margin: 0 0.1em;
+    cursor: default;
+}
+
+.rep-math:active {
+    background: rgba(59, 130, 246, 0.12);
+    border-radius: 6px;
+}
+
+/* ------------------------------------------------------------------ график */
+
+#plot-modal .plot-modal {
+    width: min(720px, calc(100vw - 24px));
+    max-height: min(92vh, 880px);
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-modal);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+    border-radius: 22px;
+    box-shadow: var(--shadow-modal);
+    overflow: hidden;
+    transform: scale(0.96);
+    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#plot-modal:not(.hidden) .plot-modal {
+    transform: scale(1);
+}
+
+.plot-modal-body {
+    padding: 14px 18px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.plot-expressions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.plot-expr-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.plot-expr-dot {
+    flex: 0 0 auto;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+}
+
+.plot-expr-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 9px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--input-bg);
+    color: var(--text-main);
+    font-size: 15px;
+    font-family: 'Cambria Math', 'Times New Roman', serif;
+}
+
+.plot-expr-input:focus {
+    outline: 2px solid var(--accent-color);
+    outline-offset: -1px;
+}
+
+.plot-expr-remove {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.plot-expr-remove:hover {
+    background: rgba(239, 68, 68, 0.12);
+    color: #ef4444;
+}
+
+.plot-add-btn {
+    align-self: flex-start;
+    padding: 6px 12px;
+    border: 1px dashed var(--border-color);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--accent-color);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.plot-add-btn:hover {
+    background: rgba(59, 130, 246, 0.08);
+}
+
+.plot-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 14px;
+}
+
+.plot-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.plot-field input {
+    width: 72px;
+    padding: 7px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 9px;
+    background: var(--input-bg);
+    color: var(--text-main);
+    font-size: 14px;
+    text-align: center;
+}
+
+.plot-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+}
+
+.plot-preview {
+    /* Глобально canvas абсолютный — возвращаем превью в поток. */
+    position: relative;
+    top: auto;
+    left: auto;
+    width: 100%;
+    height: 300px;
+    border-radius: 14px;
+    background: var(--input-bg);
+    display: block;
+    touch-action: none;
+}
+
+.plot-roots-text {
+    min-height: 18px;
+    font-size: 13px;
+    color: var(--text-main);
+    font-weight: 600;
+}
+
+.plot-error {
+    min-height: 16px;
+    font-size: 12.5px;
+    color: #ef4444;
+}
+
+@media (max-width: 768px) {
+    #plot-modal .plot-modal {
+        width: calc(100vw - 12px);
+        max-height: 94vh;
+        max-height: 92dvh;
+        border-radius: 18px;
+    }
+
+    .plot-modal-body {
+        padding: 8px 10px 4px;
+        gap: 8px;
+    }
+
+    .plot-preview {
+        height: 220px;
+        height: min(190px, 30dvh);
+    }
+
+    .plot-field input {
+        width: 64px;
+    }
+
+    /* На телефоне подсказка в подвале не нужна — экономим высоту. */
+    #plot-hint {
+        display: none;
+    }
+
+    #plot-modal .math-modal-foot {
+        padding: 8px 12px;
+        justify-content: flex-end;
+    }
+
+    #plot-modal .math-modal-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    .plot-row {
+        gap: 8px 12px;
+    }
+}
+
+/* ------------------------------------------------------------- телефон */
+
+@media (max-width: 768px) {
+    #math-modal .math-modal {
+        width: calc(100vw - 12px);
+        max-height: 94vh;
+        border-radius: 18px;
+    }
+
+    .math-modal-head {
+        padding: 12px 14px;
+    }
+
+    .math-modal-body {
+        padding: 10px 12px 4px;
+        gap: 10px;
+    }
+
+    .math-editor-host {
+        min-height: 76px;
+        max-height: 28vh;
+        font-size: 28px;
+        padding: 10px 12px;
+    }
+
+    .math-key {
+        height: 40px;
+        font-size: 16px;
+        border-radius: 10px;
+    }
+
+    .math-keypad-row {
+        gap: 5px;
+    }
+
+    .math-modal-foot {
+        padding: 10px 12px;
+        gap: 8px;
+    }
+
+    .math-hint {
+        flex-basis: 100%;
+        font-size: 11.5px;
+    }
+
+    .math-modal-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+}
+
+/* Тёмная тема: клавиши чуть светлее фона модалки. */
+body.dark-theme .math-keypad {
+    background: #1b2430;
+}
+
+body.dark-theme .math-keypad-tabs {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+body.dark-theme .math-tab.active {
+    background: #2f3a4a;
+    color: #93c5fd;
+    box-shadow: none;
+}
+
+body.dark-theme .math-keypad-caption {
+    color: #8b9bb0;
+}
+
+body.dark-theme .math-key {
+    background: #2b3442;
+    color: #e2e8f0;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+body.dark-theme .math-key:hover {
+    background: #354052;
+}
+
+body.dark-theme .math-key-op {
+    background: #263b5c;
+    color: #93c5fd;
+}
+
+body.dark-theme .math-key-op:hover {
+    background: #2e4670;
+}
+
+body.dark-theme .math-key-var {
+    background: #22304a;
+    color: #bfdbfe;
+}
+
+body.dark-theme .math-key-fn {
+    color: #e2e8f0;
+}
+
+body.dark-theme .math-key-action {
+    background: #232c39;
+    color: #94a3b8;
+}
+
+body.dark-theme .math-key-quick {
+    background: #24334d;
+    color: #bfdbfe;
+}
+
+body.dark-theme .math-key-quick:hover {
+    background: #2c3f60;
+}
+
+body.dark-theme .math-key-del {
+    background: #3f2329;
+    color: #f87171;
+}
+
+body.dark-theme .math-key-del:hover {
+    background: #4d2a31;
+}
+
+body.dark-theme .math-editor-host {
+    background: #232b37;
+    border-color: #3b475a;
+}
+
+/* ------------------------------------------- подменю «Линейки» в скрепке */
+
+/* Пометка «бета» у формул и графиков. */
+.beta-badge {
+    margin-left: auto;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #fef3c7;
+    color: #92400e;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    line-height: 1.5;
+    white-space: nowrap;
+}
+
+.beta-badge-head {
+    margin-left: 0;
+    margin-right: auto;
+    align-self: center;
+}
+
+body.dark-theme .beta-badge {
+    background: #3a2f14;
+    color: #fbbf24;
+}
+
+#addRulersMenuBtn .menu-caret {
+    margin-left: auto;
+    width: 0;
+    height: 0;
+    font-size: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid currentColor;
+    opacity: 0.55;
+    transition: transform 0.15s ease;
+}
+
+#addRulersMenuBtn.open .menu-caret {
+    transform: rotate(180deg);
+}
+
+.tool-submenu {
+    display: none;
+    margin: 2px 0 4px 16px;
+    padding-left: 8px;
+    border-left: 2px solid var(--border-color);
+}
+
+.tool-submenu.open {
+    display: block;
+}
+
+.tool-submenu a {
+    padding: 8px 12px;
+}
+
+/* ------------------------------------- поле выражения в окне графика */
+
+.plot-expr-field {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 4px;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--input-bg);
+    color: var(--text-main);
+    font-size: 17px;
+    text-align: left;
+    cursor: text;
+    overflow-x: auto;
+    white-space: nowrap;
+    font-family: 'Cambria Math', 'Times New Roman', serif;
+}
+
+.plot-expr-field:hover {
+    border-color: var(--accent-color);
+}
+
+.plot-expr-field.is-empty {
+    color: var(--text-muted);
+    font-family: 'Roboto', sans-serif;
+    font-size: 14px;
+}
+
+.plot-expr-field.is-empty::before {
+    content: 'Нажмите, чтобы ввести формулу';
+}
+
+/* Мобильная клавиатура: чуть компактнее, но всё ещё крупная. */
+@media (max-width: 768px) {
+    .math-keypad {
+        max-height: 42vh;
+        overflow-y: auto;
+    }
+
+    .math-key {
+        height: 42px;
+        font-size: 16px;
+    }
+
+    .math-tab {
+        padding: 6px 12px;
+        font-size: 12px;
+    }
+
+    .plot-expr-field {
+        min-height: 40px;
+        font-size: 15px;
+    }
+}
+/* --- END OF FILE css/formula.css --- */

@@ -2227,4 +2227,65 @@ body.dark-theme #floating-ruler-toolbar option {
     overflow-y: auto;
     overflow-x: hidden;
     box-sizing: border-box;
+}
+
+/* Экспорт: одна кнопка с вложенным списком */
+.export-menu {
+    position: relative;
+    cursor: pointer;
+}
+
+.export-menu .export-arrow {
+    margin-left: auto;
+    font-size: 11px;
+    opacity: 0.7;
+    transition: transform 0.2s;
+}
+
+.export-menu.open .export-arrow {
+    transform: rotate(180deg);
+}
+
+.settings-menu.export-open {
+    overflow: visible;
+}
+
+.export-submenu {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 230px;
+    padding: 6px;
+    border-radius: 12px;
+    background: var(--glass-surface-opaque);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    z-index: 1100;
+}
+
+.export-menu.open .export-submenu {
+    display: block;
+}
+
+.export-submenu a {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 10px;
+    border-radius: 8px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.export-submenu a:hover {
+    background: rgba(59, 130, 246, 0.10);
+    color: var(--accent-color);
+}
+
+.export-submenu .toolbar-icon {
+    width: 16px;
+    height: 16px;
 }
