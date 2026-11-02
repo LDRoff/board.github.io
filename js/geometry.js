@@ -70,7 +70,7 @@ export function getTransformedBoundingBox(layer) {
 
 export function getBoundingBox(layer) {
     if (!layer) return null;
-    if (layer.type === 'rect' || layer.type === 'image' || layer.type === 'text' || layer.type === 'pdf' || layer.type === 'sticker') {
+    if (layer.type === 'rect' || layer.type === 'image' || layer.type === 'text' || layer.type === 'pdf' || layer.type === 'sticker' || layer.type === 'formula' || layer.type === 'plot') {
         const pad = (layer.lineWidth || 2) / 2 + 2;
         return { x: layer.x - pad, y: layer.y - pad, width: layer.width + pad * 2, height: layer.height + pad * 2 };
     }

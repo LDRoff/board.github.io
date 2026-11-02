@@ -8,15 +8,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>repitorium.ru</title>
-    <link rel="icon" type="image/webp" href="icons_bord/icon-profile.webp?v=1.2.6">
-    <link rel="stylesheet" href='css/theme.css?v=1.2.6'>
-    <link rel="stylesheet" href='css/base.css?v=1.2.6'>
-    <link rel="stylesheet" href='css/toolbar.css?v=1.2.6'>
-    <link rel="stylesheet" href='css/modal.css?v=1.2.6'>
-    <link rel="stylesheet" href='css/components.css?v=1.2.6'>
-    <link rel="stylesheet" href='css/utils.css?v=1.2.6'>
-    <link rel="stylesheet" href='css/sticker.css?v=1.2.6'>
-    <link rel="stylesheet" href='css/fonts.css?v=1.2.6'>
+    <link rel="icon" type="image/webp" href="icons_bord/icon-profile.webp?v=1.4.19">
+    <link rel="stylesheet" href='css/theme.css?v=1.4.19'>
+    <link rel="stylesheet" href='css/base.css?v=1.4.19'>
+    <link rel="stylesheet" href='css/toolbar.css?v=1.4.19'>
+    <link rel="stylesheet" href='css/modal.css?v=1.4.19'>
+    <link rel="stylesheet" href='css/components.css?v=1.4.19'>
+    <link rel="stylesheet" href='css/utils.css?v=1.4.19'>
+    <link rel="stylesheet" href='css/sticker.css?v=1.4.19'>
+    <link rel="stylesheet" href='css/formula.css?v=1.4.19'>
+    <link rel="stylesheet" href='css/fonts.css?v=1.4.19'>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
 
@@ -258,29 +259,14 @@
                 <input type="file" id="projectUpload" accept=".board" hidden>
 
                 <div class="menu-section-label">Проект</div>
-                <a href="#" id="saveProjectBtn" class="menu-item">
-                    <img src="icons_bord/icon-save.webp" class="toolbar-icon" alt="Сохранить">
-                    Сохранить
+                <a href="#" id="saveProjectBtn" class="menu-item" style="display:none;">Сохранить</a>
+                <a href="#" id="exportBtn" class="menu-item">
+                    <img src="icons_bord/icon-save.webp" class="toolbar-icon" alt="Экспорт">
+                    Экспорт
                 </a>
                 <a href="#" id="openProjectBtn" class="menu-item">
                     <img src="icons_bord/icon-open.webp" class="toolbar-icon" alt="Открыть">
                     Открыть
-                </a>
-
-                <div class="menu-separator"></div>
-
-                <div class="menu-section-label">Экспорт</div>
-                <a href="#" id="exportJpgBtn" class="menu-item">
-                    <img src="icons_bord/icon-img.webp" class="toolbar-icon" alt="Экспорт в JPG">
-                    Экспорт в JPG
-                </a>
-                <a href="#" id="exportPngBtn" class="menu-item">
-                    <img src="icons_bord/icon-img.webp" class="toolbar-icon" alt="Экспорт в PNG">
-                    Экспорт в PNG
-                </a>
-                <a href="#" id="exportPdfBtn" class="menu-item">
-                    <img src="icons_bord/icon-PDF.webp" class="toolbar-icon" alt="Печать / PDF">
-                    Печать / PDF
                 </a>
 
                 <div class="menu-separator"></div>
@@ -324,6 +310,7 @@
     <canvas id="drawingBoard" class="cursor-brush" tabindex="-1"></canvas>
     <canvas id="cacheCanvas"></canvas>
     <canvas id="interactionCanvas"></canvas>
+    <canvas id="overlayCanvas"></canvas>
 
     <div id="stickers-layer" class="stickers-layer-container">
         <svg id="connectionsLayer" class="connections"></svg>
@@ -395,6 +382,10 @@
                 </button>
             </div>
         </div>
+
+        <button id="textFormulaBtn" data-action="insert-formula" title="Вставить формулу">
+            <img src="icons_bord/icon-formula.webp" class="toolbar-icon" alt="Формула">
+        </button>
 
         <div class="dropdown-container" id="align-dropdown-container">
             <button id="align-dropdown-btn" data-action="align-dropdown" title="Выравнивание текста">
@@ -655,7 +646,7 @@
 
     <!-- Настройки линейки -->
     <div id="floating-ruler-toolbar" class="floating-toolbar">
-        <!-- Группа 1: Длина и цвет -->
+        <!-- Группа 1: Длина/размер и цвет -->
         <div style="display: flex; align-items: center; gap: 6px;">
             <select id="ruler-length-select" style="padding: 4px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--input-bg); color: var(--text-primary); font-size: 13px;" title="Длина">
                 <option value="400">10 см</option>
@@ -663,6 +654,17 @@
                 <option value="800">20 см</option>
                 <option value="1000">25 см</option>
                 <option value="1200">30 см</option>
+            </select>
+
+            <select id="ruler-size-select" style="display: none; padding: 4px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--input-bg); color: var(--text-primary); font-size: 13px;" title="Размер угольника (катет)">
+                <option value="5">5 см</option>
+                <option value="8">8 см</option>
+                <option value="10" selected>10 см</option>
+                <option value="12">12 см</option>
+                <option value="15">15 см</option>
+                <option value="20">20 см</option>
+                <option value="25">25 см</option>
+                <option value="30">30 см</option>
             </select>
             
             <div id="floating-ruler-color-picker" class="color-picker-wrapper">
@@ -704,6 +706,37 @@
                 <img src="icons_bord/icon-endlessons.webp" class="toolbar-icon" alt="Готово">
             </button>
         </div>
+    </div>
+
+    <!-- Панель формулы -->
+    <div id="floating-formula-toolbar" class="floating-toolbar">
+        <button data-action="edit-formula" title="Изменить формулу">
+            <img src="icons_bord/icon-formula.webp" class="toolbar-icon" alt="Изменить">
+        </button>
+        <button data-action="graph-formula" id="formulaGraphBtn" title="Построить график по этой формуле">
+            <img src="icons_bord/icon-graph.webp" class="toolbar-icon" alt="График">
+        </button>
+        <div class="toolbar-separator"></div>
+        <button data-action="copy" title="Копировать (Ctrl+C)">
+            <img src="icons_bord/icon-copy.webp" class="toolbar-icon" alt="Копировать">
+        </button>
+        <button data-action="delete" title="Удалить">
+            <img src="icons_bord/icon-delete.webp" class="toolbar-icon" alt="Удалить">
+        </button>
+    </div>
+
+    <!-- Панель графика -->
+    <div id="floating-plot-toolbar" class="floating-toolbar">
+        <button data-action="plot-settings" title="Настроить график: функции, диапазон, подписи">
+            <img src="icons_bord/icon-graph.webp" class="toolbar-icon" alt="Настроить">
+        </button>
+        <button data-action="copy" title="Копировать (Ctrl+C)">
+            <img src="icons_bord/icon-copy.webp" class="toolbar-icon" alt="Копировать">
+        </button>
+        <div class="toolbar-separator"></div>
+        <button data-action="delete" title="Удалить">
+            <img src="icons_bord/icon-delete.webp" class="toolbar-icon" alt="Удалить">
+        </button>
     </div>
 
     <div class="toolbar-wrapper" id="toolbarWrapper">
@@ -880,6 +913,9 @@
                         </div>
                     </div>
                     <input type="number" id="mobileTextFontSizeInput" min="1" max="1000" value="30" title="Размер шрифта">
+                    <button id="mobileTextFormulaBtn" data-action="insert-formula" title="Вставить формулу">
+                        <img src="icons_bord/icon-formula.webp" class="toolbar-icon" alt="Формула">
+                    </button>
                     <div class="dropdown-container" id="mobile-text-style-container">
                         <button id="mobileTextStyleBtn" title="Стили текста">
                             <img src="icons_bord/icon-zirniy.webp" class="toolbar-icon" alt="Стили">
@@ -1035,13 +1071,38 @@
                                 <img src="icons_bord/icon-PDF.webp" class="toolbar-icon" alt="PDF">
                                 <span>PDF-документ</span>
                             </a>
-                            <a href="#" id="addRulerBtn" title="Добавить линейку">
-                                <img src="icons_bord/icon-lineyka.webp" class="toolbar-icon" alt="Линейка">
-                                <span>Линейка</span>
+                            <a href="#" id="addRulersMenuBtn" class="menu-group-toggle" title="Линейки, транспортир и угольники">
+                                <img src="icons_bord/icon-lineyka.webp" class="toolbar-icon" alt="Линейки">
+                                <span>Линейки и угольники</span>
+                                <span class="menu-caret">▾</span>
                             </a>
-                            <a href="#" id="addProtractorBtn" title="Добавить транспортир">
-                                <img src="icons_bord/icon-transportir.webp" class="toolbar-icon" alt="Транспортир">
-                                <span>Транспортир</span>
+                            <div class="tool-submenu" id="rulersSubmenu">
+                                <a href="#" id="addRulerBtn" title="Добавить линейку">
+                                    <img src="icons_bord/icon-lineyka.webp" class="toolbar-icon" alt="Линейка">
+                                    <span>Линейка</span>
+                                </a>
+                                <a href="#" id="addProtractorBtn" title="Добавить транспортир">
+                                    <img src="icons_bord/icon-transportir.webp" class="toolbar-icon" alt="Транспортир">
+                                    <span>Транспортир</span>
+                                </a>
+                                <a href="#" id="addTriangle45Btn" title="Добавить угольник 45–45–90">
+                                    <img src="icons_bord/icon-ugolnik45.webp" class="toolbar-icon" alt="Угольник 45°">
+                                    <span>Угольник 45°</span>
+                                </a>
+                                <a href="#" id="addTriangle30Btn" title="Добавить угольник 30–60–90">
+                                    <img src="icons_bord/icon-ugolnik30.webp" class="toolbar-icon" alt="Угольник 30°/60°">
+                                    <span>Угольник 30°/60°</span>
+                                </a>
+                            </div>
+                            <a href="#" id="addFormulaMenuBtn" title="Добавить формулу (F)">
+                                <img src="icons_bord/icon-formula.webp" class="toolbar-icon" alt="Формула">
+                                <span>Формула</span>
+                                <span class="beta-badge">бета</span>
+                            </a>
+                            <a href="#" id="addPlotMenuBtn" title="Добавить график (G)">
+                                <img src="icons_bord/icon-graph.webp" class="toolbar-icon" alt="График">
+                                <span>График</span>
+                                <span class="beta-badge">бета</span>
                             </a>
                             <a href="#" id="pasteFromClipboardBtn">
                                 <img src="icons_bord/icon-paste.webp" class="toolbar-icon" alt="Вставить">
@@ -1050,6 +1111,134 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay hidden" id="canvas-onboarding">
+        <div class="modal onboarding-modal">
+            <div class="onboarding-header">
+                <h3>Какой холст вам нужен?</h3>
+                <p>Это можно изменить позже в настройках.</p>
+            </div>
+
+            <div class="onboarding-cards">
+                <button type="button" class="onboarding-card active" data-mode="infinite">
+                    <div class="onb-preview onb-infinite">
+                        <span class="onb-grid"></span>
+                        <img class="onb-cursor" src="icons_bord/icon-cursor.webp" alt="">
+                        <span class="onb-pan-label">Холст двигается в любую сторону</span>
+                    </div>
+                    <h4>Бесконечный холст</h4>
+                    <p>Свободное пространство без границ. Подходит для схем, рисунков и заметок в любом направлении.</p>
+                </button>
+
+                <button type="button" class="onboarding-card" data-mode="notebook">
+                    <div class="onb-preview onb-notebook">
+                        <span class="onb-sheet s1"></span>
+                        <span class="onb-sheet s2"></span>
+                        <span class="onb-sheet s3"></span>
+                        <img class="onb-cursor" src="icons_bord/icon-cursor.webp" alt="">
+                        <span class="onb-pan-label">Листы идут вниз</span>
+                    </div>
+                    <h4>Тетрадный лист</h4>
+                    <p>Страницы идут вниз одна за другой, как в тетради. Удобно для конспектов и будущего PDF.</p>
+                </button>
+            </div>
+
+            <div class="onboarding-options">
+                <label>Фон
+                    <select id="onboardingBg">
+                        <option value="grid">В клетку</option>
+                        <option value="dot">В точку</option>
+                        <option value="lined">В линейку</option>
+                    </select>
+                </label>
+                <label>Формат листа
+                    <select id="onboardingFormat">
+                        <option value="A4">A4</option>
+                        <option value="A3">A3</option>
+                        <option value="A5">A5</option>
+                        <option value="Letter">Letter</option>
+                    </select>
+                </label>
+                <label>Ориентация
+                    <select id="onboardingOrientation">
+                        <option value="portrait">Книжная</option>
+                        <option value="landscape">Альбомная</option>
+                    </select>
+                </label>
+            </div>
+
+            <label class="onboarding-checkbox" id="onboardingShowGuidesRow">
+                <input type="checkbox" id="onboardingShowGuides" checked>
+                Показывать разметку страниц на бесконечном холсте
+            </label>
+
+            <p class="onboarding-note">
+                Поменять режим, формат и ориентацию можно в любой момент: <strong>Настройки → Внешний вид → Холст</strong>.
+                Рисунок не пропадёт: всё, что окажется за пределами листов, останется видимым и будет подсвечено.
+            </p>
+
+            <label class="onboarding-checkbox" id="onboardingClearOption" style="display: none;">
+                <input type="checkbox" id="onboardingShowOnClear" checked>
+                Показывать это окно при очистке доски
+            </label>
+
+            <div class="onboarding-actions">
+                <button type="button" class="btn-primary" id="onboardingCreate">Создать холст</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay hidden" id="export-modal">
+        <div class="modal export-modal">
+            <div class="export-modal-header">
+                <h3>Экспорт</h3>
+                <button type="button" id="exportCloseBtn" class="modal-close" aria-label="Закрыть">×</button>
+            </div>
+
+            <div class="export-field">
+                <span>Что экспортировать</span>
+                <div class="custom-dropdown export-custom" id="exportFormatDropdown">
+                    <div class="dropdown-header">
+                        <span class="dropdown-label">PNG — страницы</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                    </div>
+                    <div class="dropdown-list">
+                        <div class="dropdown-item active" data-value="png-pages">PNG — страницы</div>
+                        <div class="dropdown-item" data-value="pdf-pages">PDF — страницы</div>
+                        <div class="dropdown-item" data-value="jpg-view">JPG — текущий вид</div>
+                        <div class="dropdown-item" data-value="png-view">PNG — текущий вид</div>
+                        <div class="dropdown-item" data-value="board">Проект .board</div>
+                    </div>
+                </div>
+            </div>
+
+            <label class="export-field">Имя файла
+                <input type="text" id="exportFileName" value="my-board" autocomplete="off">
+            </label>
+
+            <div class="export-field" id="exportPdfQualityRow">
+                <span>Качество PDF</span>
+                <div class="custom-dropdown export-custom" id="exportPdfQualityDropdown">
+                    <div class="dropdown-header">
+                        <span class="dropdown-label">Обычное</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                    </div>
+                    <div class="dropdown-list">
+                        <div class="dropdown-item" data-value="1.5">Лёгкое</div>
+                        <div class="dropdown-item active" data-value="2">Обычное</div>
+                        <div class="dropdown-item" data-value="3">Высокое</div>
+                    </div>
+                </div>
+            </div>
+
+            <p class="export-hint" id="exportHint"></p>
+
+            <div class="export-modal-actions">
+                <button type="button" class="btn-secondary" id="exportCancelBtn">Отмена</button>
+                <button type="button" class="btn-primary" id="exportStartBtn">Экспортировать</button>
             </div>
         </div>
     </div>
@@ -1116,12 +1305,59 @@
                                 <div class="dropdown-list">
                                     <div class="dropdown-item active" data-value="grid">В клетку</div>
                                     <div class="dropdown-item" data-value="dot">В точку</div>
+                                    <div class="dropdown-item" data-value="lined">В линейку</div>
                                 </div>
                             </div>
                         </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <span class="setting-name">Холст</span>
+                                <span class="setting-desc">Режим, формат и ориентация листов</span>
+                            </div>
+                            <div class="settings-canvas-controls">
+                                <div class="custom-dropdown settings-canvas-dropdown" id="settingsCanvasModeDropdown">
+                                    <div class="dropdown-header">
+                                        <span class="dropdown-label">Бесконечный</span>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                    </div>
+                                    <div class="dropdown-list">
+                                        <div class="dropdown-item active" data-value="infinite">Бесконечный</div>
+                                        <div class="dropdown-item" data-value="notebook">Тетрадный лист</div>
+                                    </div>
+                                </div>
+                                <div class="custom-dropdown settings-canvas-dropdown" id="settingsPageFormatDropdown">
+                                    <div class="dropdown-header">
+                                        <span class="dropdown-label">A4</span>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                    </div>
+                                    <div class="dropdown-list">
+                                        <div class="dropdown-item active" data-value="A4">A4</div>
+                                        <div class="dropdown-item" data-value="A3">A3</div>
+                                        <div class="dropdown-item" data-value="A5">A5</div>
+                                        <div class="dropdown-item" data-value="Letter">Letter</div>
+                                    </div>
+                                </div>
+                                <div class="custom-dropdown settings-canvas-dropdown" id="settingsPageOrientationDropdown">
+                                    <div class="dropdown-header">
+                                        <span class="dropdown-label">Книжная</span>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                    </div>
+                                    <div class="dropdown-list">
+                                        <div class="dropdown-item active" data-value="portrait">Книжная</div>
+                                        <div class="dropdown-item" data-value="landscape">Альбомная</div>
+                                    </div>
+                                </div>
+                                <label class="settings-inline-toggle">
+                                    <input type="checkbox" id="settingsShowPageGuides" checked>
+                                    Границы страниц
+                                </label>
+                                <label class="settings-inline-toggle">
+                                    <input type="checkbox" id="settingsAskCanvasOnClear" checked>
+                                    Спрашивать холст при очистке
+                                </label>
+                            </div>
+                        </div>
                     </div>
-
-                    <!-- Поведение холста -->
                     <div id="settings-tab-behavior" class="settings-panel">
                         <h3>Поведение холста</h3>
 
@@ -1160,6 +1396,17 @@
                             </div>
                             <label class="toggle-switch">
                                 <input type="checkbox" id="proportional-scale-toggle" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <span class="setting-name">Автоформулы в тексте</span>
+                                <span class="setting-desc">«2x-5», «1/2», «x^2» сами превращаются в формулы при вводе</span>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="auto-formula-toggle" checked>
                                 <span class="toggle-slider"></span>
                             </label>
                         </div>
@@ -1308,7 +1555,7 @@
 
     <div id="object-counter" class="hidden"></div>
 
-    <script type="module" src='js/main.js?v=1.2.6'></script>
+    <script type="module" src='js/main.js?v=1.4.19'></script>
 
     <script>
         // Диагностика деплоя: если js/css/иконки не выложены, вместо вечного
@@ -1341,6 +1588,83 @@
             }, 10000);
         })();
     </script>
+
+    <!-- Окно графика -->
+    <div class="modal-overlay hidden" id="plot-modal">
+        <div class="plot-modal">
+            <div class="math-modal-head">
+                <h3 id="plot-modal-title">График</h3>
+                <span class="beta-badge beta-badge-head">бета</span>
+                <button type="button" class="modal-close" id="plot-modal-close" aria-label="Закрыть">×</button>
+            </div>
+
+            <div class="plot-modal-body">
+                <div class="plot-expressions" id="plot-expressions"></div>
+                <button type="button" class="plot-add-btn" id="plot-add-expr">+ ещё функция</button>
+
+                <div class="plot-row">
+                    <label class="plot-field">x от <input type="number" id="plot-x-min" value="-6" step="1"></label>
+                    <label class="plot-field">до <input type="number" id="plot-x-max" value="6" step="1"></label>
+                    <label class="plot-check"><input type="checkbox" id="plot-y-auto" checked> Y автоматически</label>
+                </div>
+
+                <div class="plot-row" id="plot-y-range" style="display: none;">
+                    <label class="plot-field">y от <input type="number" id="plot-y-min" value="-5" step="1"></label>
+                    <label class="plot-field">до <input type="number" id="plot-y-max" value="5" step="1"></label>
+                </div>
+
+                <div class="plot-row">
+                    <label class="plot-check"><input type="checkbox" id="plot-grid" checked> Сетка</label>
+                    <label class="plot-check"><input type="checkbox" id="plot-roots" checked> Корни</label>
+                    <label class="plot-check"><input type="checkbox" id="plot-intersections" checked> Пересечения</label>
+                    <label class="plot-check"><input type="checkbox" id="plot-ticks" checked> Подписи делений</label>
+                </div>
+
+                <div class="plot-row">
+                    <label class="plot-check"><input type="checkbox" id="plot-axis-labels" checked> Оси с подписями</label>
+                    <label class="plot-check"><input type="checkbox" id="plot-header" checked> Заголовок с формулой</label>
+                </div>
+
+                <canvas id="plot-preview" class="plot-preview"></canvas>
+                <div class="plot-roots-text" id="plot-roots-text"></div>
+                <div class="plot-error" id="plot-error"></div>
+            </div>
+
+            <div class="math-modal-foot">
+                <span class="math-hint" id="plot-hint">Можно ввести y = x^2 - 4 или уравнение x^2 - 4 = 0</span>
+                <div class="math-modal-actions">
+                    <button type="button" class="btn btn-secondary" id="plot-cancel">Отмена</button>
+                    <button type="button" class="btn btn-primary" id="plot-done">Готово</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Окно ввода формулы -->
+    <div class="modal-overlay hidden" id="math-modal">
+        <div class="math-modal">
+            <div class="math-modal-head">
+                <h3 id="math-modal-title">Формула</h3>
+                <span class="beta-badge beta-badge-head">бета</span>
+                <button type="button" class="modal-close" id="math-modal-close" aria-label="Закрыть">×</button>
+            </div>
+
+            <div class="math-modal-body">
+                <div id="math-editor-host" class="math-editor-host" spellcheck="false"></div>
+                <div class="math-keypad" id="math-keypad"></div>
+            </div>
+
+            <div class="math-modal-foot">
+                <button type="button" class="math-kb-btn" id="math-keyboard-toggle" style="display:none;" title="Показать системную клавиатуру">⌨</button>
+                <span class="math-hint" id="math-hint">Набирайте кнопками — или включите системную клавиатуру</span>
+                <div class="math-modal-actions">
+                    <button type="button" class="btn btn-secondary" id="math-cancel">Отмена</button>
+                    <button type="button" class="btn btn-secondary" id="math-graph" title="Вставить формулу и построить график">График</button>
+                    <button type="button" class="btn btn-primary" id="math-done">Готово</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Hidden paste catcher for mobile/Android -->
     <div id="pasteCatcher" contenteditable="true" tabindex="-1" aria-hidden="true"

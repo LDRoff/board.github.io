@@ -1,16 +1,25 @@
 // --- START OF FILE js/pointerHandlers.js ---
 
-import * as geo from './geometry.js?v=1.2.6';
-import * as hitTest from './hitTest.js?v=1.2.6';
-import * as actions from './actions.js?v=1.2.6';
-import * as tools from './tools.js?v=1.2.6';
-import * as utils from './utils.js?v=1.2.6';
-import * as shapeRecognizer from './shapeRecognizer.js?v=1.2.6';
-import * as textTool from './text.js?v=1.2.6';
+import * as geo from './geometry.js?v=1.4.19';
+import * as hitTest from './hitTest.js?v=1.4.19';
+import * as actions from './actions.js?v=1.4.19';
+import * as tools from './tools.js?v=1.4.19';
+import * as utils from './utils.js?v=1.4.19';
+import * as shapeRecognizer from './shapeRecognizer.js?v=1.4.19';
+import * as textTool from './text.js?v=1.4.19';
 // --- ИЗМЕНЕНИЕ: Импортируем новые функции для DOM-курсора ---
-import { updateEraserCursor, hideEraserCursor, updateCursor, showRulerSettings, syncRulerSettingsAngle, getHandCursor, getHandGrabbingCursor, getSelectCursor } from './ui.js?v=1.2.6';
+import { updateEraserCursor, hideEraserCursor, updateCursor, showRulerSettings, syncRulerSettingsAngle, syncRulerSettingsSize, getHandCursor, getHandGrabbingCursor, getSelectCursor } from './ui.js?v=1.4.19';
 // -----------------------------------------------------------
-import { drawLayer, drawSelectionBox, drawRulers } from './renderer.js?v=1.2.6';
+import { drawLayer, drawSelectionBox, drawRulers, drawOffPageHighlights } from './renderer.js?v=1.4.19';
+import { getPageLayout, isInsidePage, isInsideNotebookPage } from './pages.js?v=1.4.19';
+import * as rulerTools from './rulerTools.js?v=1.4.19';
+import { openEditFormulaDialog } from './formulaLayer.js?v=1.4.19';
+
+const PAGE_DRAW_TOOLS = new Set([
+    'brush', 'smart-brush', 'text', 'curve',
+    'rect', 'ellipse', 'line', 'parallelogram', 'triangle', 'trapezoid', 'rhombus',
+    'sphere', 'cone', 'parallelepiped', 'pyramid', 'frustum', 'truncated-pyramid', 'truncated-sphere'
+]);
 
 // ... (константы и функции prepareInteractionCache, isSpenButtonPressed, checkAndHandleSpenEraser без изменений) ...
 const TOOLTIP_MESSAGES = {
@@ -36,7 +45,10 @@ function assignParentToTempLayer(state) {
 
 function prepareInteractionCache(state) {
     state.isInteracting = true;
-    
+
+    // Пока тащим/вращаем — панель элемента не нужна и мешает.
+    if (state.updateFloatingToolbar) state.updateFloatingToolbar();
+
     state.redrawInteraction = () => {
         const { iCtx, selectedLayers, cacheCanvas, interactionCanvas } = state;
         const dpr = window.devicePixelRatio || 1;
@@ -60,6 +72,22 @@ function prepareInteractionCache(state) {
 
         drawSelectionBox(iCtx, selectedLayers, state);
         iCtx.restore();
+
+        // Линейки и подсветку дублируем на overlay выше стикеров.
+        // Рамку выделения сюда НЕ рисуем: она уже есть на interaction-слое
+        // в новом положении, иначе на старом месте остаётся «призрак» рамки.
+        if (state.oCtx && state.overlayCanvas) {
+            const oCtx = state.oCtx;
+            oCtx.setTransform(1, 0, 0, 1, 0, 0);
+            oCtx.clearRect(0, 0, state.overlayCanvas.width, state.overlayCanvas.height);
+            oCtx.save();
+            oCtx.scale(dpr, dpr);
+            oCtx.translate(state.panX, state.panY);
+            oCtx.scale(state.zoom, state.zoom);
+            drawRulers(oCtx, state);
+            drawOffPageHighlights(oCtx, state);
+            oCtx.restore();
+        }
 
         if (state.editingAnnotationsLayerId) {
             const sticker = window.stickerApp.stickers.find(s => s.id === state.editingAnnotationsLayerId);
@@ -374,6 +402,12 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
             state.activeRuler = hitPart.ruler;
             state.rulerAction = hitPart.part; 
             state.rulerStartPos = pos;
+
+            // Изменение размера угольника считаем от прямого угла (x, y).
+            if (hitPart.part === 'resize') {
+                state.rulerResizeStartSize = hitPart.ruler.size || 0;
+                state.rulerResizeStartDist = Math.max(1, Math.hypot(pos.x - hitPart.ruler.x, pos.y - hitPart.ruler.y));
+            }
             
             const cos = Math.cos(hitPart.ruler.angle);
             const sin = Math.sin(hitPart.ruler.angle);
@@ -394,6 +428,27 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
     }
     // --------------------------------------
 
+    // --- Кнопки на карточке графика ---
+    if (state.layers && state.selectedLayers && state.selectedLayers.length > 0 && !state.isDrawing && e.button !== 1) {
+        const plotHit = hitTest.getHitPlotButton(pos, state.selectedLayers, state.zoom);
+        if (plotHit) {
+            if (plotHit.part === 'delete') {
+                state.layers = state.layers.filter(l => l.id !== plotHit.layer.id);
+                state.selectedLayers = state.selectedLayers.filter(l => l.id !== plotHit.layer.id);
+                if (state.tileManager) state.tileManager.clear();
+                if (state.saveState) state.saveState({ type: 'deletion', before: [plotHit.layer], after: [] });
+                if (state.saveViewState) state.saveViewState();
+                if (state.updateFloatingToolbar) state.updateFloatingToolbar();
+                redrawCallback();
+                return;
+            }
+            if (plotHit.part === 'settings') {
+                import('./plotLayer.js?v=1.4.19').then((plot) => plot.openPlotEditor(state, plotHit.layer));
+                return;
+            }
+        }
+    }
+
     const isPanToolActive = state.activeTool === 'pan' && e.button === 0;
     const isMiddleMouseButton = e.pointerType === 'mouse' && e.button === 1;
 
@@ -411,6 +466,21 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
     }
 
     if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+    // В тетрадном режиме новые рисунки/фигуры/текст создаются только на листе.
+    // За его пределами тот же жест работает как панорамирование.
+    if (state.canvasMode === 'notebook' && PAGE_DRAW_TOOLS.has(state.activeTool)) {
+        if (!isInsideNotebookPage(pos, getPageLayout(state))) {
+            state.isPanning = true;
+            state.lastPanPos = { x: e.clientX, y: e.clientY };
+            if (state.activeTool !== 'laser') {
+                state.canvas.style.cursor = getHandGrabbingCursor();
+            }
+            document.addEventListener('pointermove', state.onPointerMove);
+            document.addEventListener('pointerup', state.onPointerUp);
+            return;
+        }
+    }
 
     hideContextMenu();
 
@@ -451,6 +521,21 @@ export function startDrawing(state, callbacks, hideContextMenu, e) {
                 if (!isChild || !isSamePage) {
                     clickedLayer = null;
                 }
+            }
+            if (clickedLayer && clickedLayer.type === 'plot') {
+                // Двойной клик по графику открывает его настройки.
+                state.selectedLayers = [clickedLayer];
+                import('./plotLayer.js?v=1.4.19').then((plot) => plot.openPlotEditor(state, clickedLayer));
+                if (state.updateFloatingToolbar) state.updateFloatingToolbar();
+                if (state.redraw) state.redraw();
+                return;
+            }
+            if (clickedLayer && clickedLayer.type === 'formula') {
+                // Двойной клик по формуле открывает её редактор.
+                state.selectedLayers = [clickedLayer];
+                openEditFormulaDialog(state, clickedLayer);
+                if (state.redraw) state.redraw();
+                return;
             }
             if (clickedLayer && clickedLayer.type === 'text') {
                 state.selectedLayers = [clickedLayer];
@@ -901,6 +986,11 @@ export function draw(state, callbacks, e) {
         state.lastPointerClientPos = { x: e.clientX, y: e.clientY };
     }
 
+    if (!state.isPanning && state.canvasMode === 'notebook' && PAGE_DRAW_TOOLS.has(state.activeTool)) {
+        const pagePos = utils.getMousePos(e, state);
+        if (!isInsideNotebookPage(pagePos, getPageLayout(state))) return;
+    }
+
     const { redrawCallback, saveViewStateCallback, drawBackgroundCallback } = callbacks;
     const dpr = window.devicePixelRatio || 1;
 
@@ -1009,6 +1099,20 @@ export function draw(state, callbacks, e) {
             state.activeRuler.pivotOffsetY = newOffsetY;
             state.rulerStartPos = pos;
             updateCursor(state, 'pivot');
+        } else if (state.rulerAction === 'resize') {
+            // Угольник тянется за середину гипотенузы: размер растёт
+            // пропорционально удалению от прямого угла.
+            const dist = Math.hypot(pos.x - state.activeRuler.x, pos.y - state.activeRuler.y);
+            const startDist = state.rulerResizeStartDist || 0;
+            const startSize = state.rulerResizeStartSize || state.activeRuler.size || 0;
+            if (startDist > 0 && startSize > 0) {
+                // С включённым «магнитом» размер прыгает по сантиметрам, иначе по миллиметрам.
+                const step = state.activeRuler.snapEnabled ? rulerTools.MM * 10 : rulerTools.MM;
+                const rawSize = startSize * (dist / startDist);
+                state.activeRuler.size = rulerTools.clampSize(Math.round(rawSize / step) * step);
+            }
+            updateCursor(state, 'resize');
+            syncRulerSettingsSize();
         } else if (state.rulerAction === 'rotate') {
             const cos = Math.cos(state.activeRuler.angle);
             const sin = Math.sin(state.activeRuler.angle);
@@ -1332,6 +1436,9 @@ export function draw(state, callbacks, e) {
                     } else if (hitPart.part === 'pivot') {
                         updateCursor(state, 'pivot');
                         return;
+                    } else if (hitPart.part === 'resize') {
+                        updateCursor(state, 'resize');
+                        return;
                     } else if (hitPart.part === 'body') {
                         state.canvas.style.cursor = getSelectCursor();
                         return;
@@ -1452,6 +1559,23 @@ export function stopDrawing(state, callbacks, e) {
         state.iCtx.clearRect(0, 0, state.interactionCanvas.width, state.interactionCanvas.height);
         state.cacheCtx.setTransform(1, 0, 0, 1, 0, 0);
         state.cacheCtx.clearRect(0, 0, state.cacheCanvas.width, state.cacheCanvas.height);
+
+        // После масштабирования формулы перерисовываем её в новом размере,
+        // чтобы картинка не растягивалась и оставалась чёткой.
+        if (state.currentAction === 'scaling') {
+            const formulas = state.selectedLayers.filter((l) => l && l.type === 'formula');
+            if (formulas.length) {
+                import('./formulaLayer.js?v=1.4.19').then(async (formulaLayer) => {
+                    for (const layer of formulas) {
+                        await formulaLayer.refreshFormulaResolution(layer);
+                    }
+                    if (state.tileManager) {
+                        formulas.forEach((layer) => state.tileManager.invalidateLayer(layer, state));
+                    }
+                    if (state.redraw) state.redraw();
+                }).catch(() => {});
+            }
+        }
     }
 
     if (state.currentAction === 'drawingCurve') {

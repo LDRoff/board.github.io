@@ -1,5 +1,5 @@
-import { snapToGrid } from './utils.js?v=1.2.6';
-import * as hitTest from './hitTest.js?v=1.2.6';
+import { snapToGrid } from './utils.js?v=1.4.19';
+import * as hitTest from './hitTest.js?v=1.4.19';
 
 export function handleBrush(state, pos, e) {
     const pressure = e.pressure > 0 ? e.pressure : 0.5;

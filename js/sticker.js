@@ -1,9 +1,9 @@
 // --- START OF FILE js/sticker.js ---
 
-import * as utils from './utils.js?v=1.2.6';
-import * as hitTest from './hitTest.js?v=1.2.6';
-import { drawLayer, drawSelectionBox } from './renderer.js?v=1.2.6';
-import { positionElement } from './ui.js?v=1.2.6';
+import * as utils from './utils.js?v=1.4.19';
+import * as hitTest from './hitTest.js?v=1.4.19';
+import { drawLayer, drawSelectionBox } from './renderer.js?v=1.4.19';
+import { positionElement } from './ui.js?v=1.4.19';
 
 export class Sticker {
     constructor(stickerApp, canvasState, layer) {

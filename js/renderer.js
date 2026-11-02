@@ -1,9 +1,13 @@
 // --- START OF FILE js/renderer.js ---
 
-import { getBoundingBox, getGroupBoundingBox, getGroupLogicalBoundingBox, rotatePoint, getTransformedBoundingBox, doBoxesIntersect, getRotationCenter } from './geometry.js?v=1.2.6';
-import { getSelectionRotation } from './hitTest.js?v=1.2.6';
-import { buildSpatialGrid, createTextImage } from './utils.js?v=1.2.6';
-import { getActiveRulerForSettings } from './ui.js?v=1.2.6';
+import { getBoundingBox, getGroupBoundingBox, getGroupLogicalBoundingBox, rotatePoint, getTransformedBoundingBox, doBoxesIntersect, getRotationCenter } from './geometry.js?v=1.4.19';
+import { getSelectionRotation } from './hitTest.js?v=1.4.19';
+import { buildSpatialGrid, createTextImage } from './utils.js?v=1.4.19';
+import { getActiveRulerForSettings } from './ui.js?v=1.4.19';
+import { getPageLayout, getNotebookPageRects, getPageKeyFromRect, getPageAt, orderFilledPages } from './pages.js?v=1.4.19';
+import * as rulerTools from './rulerTools.js?v=1.4.19';
+import { renderFormulaImage } from './formulaLayer.js?v=1.4.19';
+import { drawPlotLayer, drawPlotChrome } from './plotLayer.js?v=1.4.19';
 
 // --- PDF navigation icon cache ---
 const _pdfNavIcons = { prev: null, next: null };
@@ -28,6 +32,12 @@ export function drawRulers(ctx, canvasState) {
         ctx.save();
         ctx.translate(ruler.x, ruler.y);
         ctx.rotate(ruler.angle);
+
+        if (rulerTools.isTriangleRuler(ruler)) {
+            drawTriangleRuler(ctx, ruler, isDarkMode, scaleFactor);
+            ctx.restore();
+            return;
+        }
 
         if (ruler.type === 'protractor') {
             const radius = ruler.radius || 200;
@@ -417,6 +427,298 @@ export function drawRulers(ctx, canvasState) {
     });
 
     ctx.restore();
+}
+
+// Круглая кнопка на корпусе инструмента — та же, что у линейки и транспортира:
+// красная с крестиком для удаления, серая с шестерёнкой для настроек.
+function drawRulerToolButton(ctx, x, y, sf, kind) {
+    ctx.fillStyle = kind === 'delete' ? '#EF4444' : '#6B7280';
+    ctx.beginPath();
+    ctx.arc(x, y, 9 * sf, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (kind === 'delete') {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2 * sf;
+        ctx.beginPath();
+        ctx.moveTo(x - 4 * sf, y - 4 * sf);
+        ctx.lineTo(x + 4 * sf, y + 4 * sf);
+        ctx.moveTo(x + 4 * sf, y - 4 * sf);
+        ctx.lineTo(x - 4 * sf, y + 4 * sf);
+        ctx.stroke();
+    } else {
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${12 * sf}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('⚙', x, y + 1 * sf);
+    }
+}
+
+// Стрелки «наружу-внутрь» на синей ручке изменения размера.
+function drawRulerScaleGlyph(ctx, x, y, ux, uy, sf) {
+    const px = -uy;
+    const py = ux;
+
+    ctx.strokeStyle = '#fff';
+    ctx.fillStyle = '#fff';
+    ctx.lineWidth = 1.6 * sf;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x - ux * 2.5 * sf, y - uy * 2.5 * sf);
+    ctx.lineTo(x + ux * 2.5 * sf, y + uy * 2.5 * sf);
+    ctx.stroke();
+
+    const arrow = (ax, ay, dirX, dirY) => {
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(ax - dirX * 4 * sf + px * 2.4 * sf, ay - dirY * 4 * sf + py * 2.4 * sf);
+        ctx.lineTo(ax - dirX * 4 * sf - px * 2.4 * sf, ay - dirY * 4 * sf - py * 2.4 * sf);
+        ctx.closePath();
+        ctx.fill();
+    };
+    arrow(x + ux * 6 * sf, y + uy * 6 * sf, ux, uy);
+    arrow(x - ux * 6 * sf, y - uy * 6 * sf, -ux, -uy);
+    ctx.lineCap = 'butt';
+}
+
+// Угольник 45–45–90 или 30–60–90. Рисуем в локальных координатах инструмента
+// (ctx уже сдвинут в (x, y) и повёрнут на angle), в том же стиле, что линейка.
+function drawTriangleRuler(ctx, ruler, isDarkMode, sf) {
+    const g = rulerTools.getTriangleGeometry(ruler);
+    const { A, B, H, O, P, Q } = g;
+    const n = g.normal;
+
+    // --- Полупрозрачный корпус с чёткой окантовкой ---
+    let bodyColor = isDarkMode ? 'rgba(40, 40, 40, 0.8)' : 'rgba(255, 255, 255, 0.8)';
+    if (ruler.color) bodyColor = ruler.color + 'CC'; // 80% opacity, как у остальных
+
+    ctx.lineJoin = 'round';
+    ctx.fillStyle = bodyColor;
+    ctx.strokeStyle = isDarkMode ? '#555' : '#ccc';
+    ctx.lineWidth = 1 * sf;
+
+    ctx.beginPath();
+    ctx.moveTo(O.x, O.y);
+    ctx.lineTo(P.x, P.y);
+    ctx.lineTo(Q.x, Q.y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // --- Деления в миллиметрах/сантиметрах ---
+    // 1 см = 10 * rulerTools.MM мировых единиц. При отдалении мелкие
+    // деления и подписи убираем — как у простой линейки.
+    const mmVisual = rulerTools.MM / sf;
+    const showMm = mmVisual >= 3;
+    const showHalfCm = mmVisual * 5 >= 3;
+    const showLabels = sf <= 3;
+    const tickColor = isDarkMode ? '#ccc' : '#333';
+    const softColor = isDarkMode ? '#888' : '#666';
+
+    const tickLenFor = (mm) => {
+        if (mm % 10 === 0) return 14 * sf;        // сантиметр
+        if (mm % 5 === 0) return showHalfCm ? 9 * sf : 0;  // полсантиметра
+        return showMm ? 5 * sf : 0;               // миллиметр
+    };
+
+    ctx.strokeStyle = tickColor;
+    ctx.lineWidth = 1 * sf;
+
+    ctx.beginPath();
+    const stepsX = Math.floor((A - 2 * sf) / rulerTools.MM);
+    for (let mm = 0; mm <= stepsX; mm++) {
+        const len = tickLenFor(mm);
+        if (!len) continue;
+        const ts = mm * rulerTools.MM;
+        const room = B * (1 - ts / A); // высота корпуса над катетом
+        const l = Math.min(len, room * 0.6);
+        if (l < 1) continue;
+        ctx.moveTo(ts, 0);
+        ctx.lineTo(ts, -l);
+    }
+    ctx.stroke();
+
+    ctx.beginPath();
+    const stepsY = Math.floor((B - 2 * sf) / rulerTools.MM);
+    for (let mm = 0; mm <= stepsY; mm++) {
+        const len = tickLenFor(mm);
+        if (!len) continue;
+        const ts = mm * rulerTools.MM;
+        const room = A * (1 - ts / B); // ширина корпуса у второго катета
+        const l = Math.min(len, room * 0.6);
+        if (l < 1) continue;
+        ctx.moveTo(0, -ts);
+        ctx.lineTo(l, -ts);
+    }
+    ctx.stroke();
+
+    // Гипотенуза: короткие деления внутрь корпуса.
+    const inward = { x: -n.x, y: -n.y };
+    ctx.beginPath();
+    const stepsH = Math.floor((H - 2 * sf) / rulerTools.MM);
+    for (let mm = 1; mm <= stepsH; mm++) {
+        const len = tickLenFor(mm) * 0.75;
+        if (!len) continue;
+        const s = mm * rulerTools.MM;
+        const px = P.x + g.tangent.x * s;
+        const py = P.y + g.tangent.y * s;
+        ctx.moveTo(px, py);
+        ctx.lineTo(px + inward.x * len, py + inward.y * len);
+    }
+    ctx.stroke();
+
+    // --- Цифры вдоль сторон ---
+    // Каждая подпись проверяется по углам: она должна целиком лежать внутри
+    // корпуса и не пересекаться с уже поставленными подписями. Так цифры
+    // не наезжают друг на друга и не вылезают за остриё.
+    if (showLabels) {
+        const placedBoxes = [];
+        const h = 10 * sf;
+
+        const insideAll = (corners) => corners.every((c) => rulerTools.isPointInTriangle(c.x, c.y, g));
+
+        const reserveBox = (corners) => {
+            const pad = 1.5 * sf;
+            const xs = corners.map((c) => c.x);
+            const ys = corners.map((c) => c.y);
+            const box = {
+                x0: Math.min(...xs) - pad,
+                y0: Math.min(...ys) - pad,
+                x1: Math.max(...xs) + pad,
+                y1: Math.max(...ys) + pad,
+            };
+            const overlaps = placedBoxes.some((b) =>
+                !(box.x1 < b.x0 || box.x0 > b.x1 || box.y1 < b.y0 || box.y0 > b.y1));
+            if (overlaps) return false;
+            placedBoxes.push(box);
+            return true;
+        };
+
+        ctx.fillStyle = tickColor;
+        ctx.font = `${10 * sf}px Arial`;
+        ctx.textAlign = 'center';
+
+        // Нижний катет.
+        ctx.textBaseline = 'bottom';
+        for (let cm = 1; cm <= 100; cm++) {
+            const ts = cm * 10 * rulerTools.MM;
+            if (ts > A) break;
+            const txt = String(cm);
+            const w = ctx.measureText(txt).width;
+            const corners = [
+                { x: ts - w / 2, y: -17 * sf }, { x: ts + w / 2, y: -17 * sf },
+                { x: ts - w / 2, y: -17 * sf - h }, { x: ts + w / 2, y: -17 * sf - h },
+            ];
+            if (!insideAll(corners) || !reserveBox(corners)) continue;
+            ctx.fillText(txt, ts, -17 * sf);
+        }
+
+        // Второй катет: цифры повёрнуты вдоль стороны.
+        for (let cm = 1; cm <= 100; cm++) {
+            const ts = cm * 10 * rulerTools.MM;
+            if (ts > B) break;
+            const txt = String(cm);
+            const w = ctx.measureText(txt).width;
+            // После поворота на -90°: x — от 17sf до 17sf + h, y — вокруг -ts.
+            const corners = [
+                { x: 17 * sf, y: -ts - w / 2 }, { x: 17 * sf + h, y: -ts - w / 2 },
+                { x: 17 * sf, y: -ts + w / 2 }, { x: 17 * sf + h, y: -ts + w / 2 },
+            ];
+            if (!insideAll(corners) || !reserveBox(corners)) continue;
+            ctx.save();
+            ctx.translate(17 * sf, -ts);
+            ctx.rotate(-Math.PI / 2);
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText(txt, 0, 0);
+            ctx.restore();
+        }
+
+        // Гипотенуза: цифры идут от вершины P вдоль стороны.
+        const along = Math.atan2(B, A); // направление от Q к P
+        const ux = Math.cos(along);
+        const uy = Math.sin(along);
+        for (let cm = 1; cm <= 100; cm++) {
+            const s = cm * 10 * rulerTools.MM;
+            if (s > H) break;
+            const txt = String(cm);
+            const w = ctx.measureText(txt).width;
+            const ox = P.x + g.tangent.x * s + inward.x * 16 * sf;
+            const oy = P.y + g.tangent.y * s + inward.y * 16 * sf;
+            const corners = [];
+            for (const sw of [-w / 2, w / 2]) {
+                for (const sh of [0, h]) {
+                    corners.push({ x: ox + ux * sw + inward.x * sh, y: oy + uy * sw + inward.y * sh });
+                }
+            }
+            if (!insideAll(corners) || !reserveBox(corners)) continue;
+            ctx.save();
+            ctx.translate(ox, oy);
+            ctx.rotate(along);
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText(txt, 0, 0);
+            ctx.restore();
+        }
+
+        // --- Подписи углов: 90° и два фиксированных ---
+        ctx.fillStyle = softColor;
+        ctx.font = `${11 * sf}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const ah = 11 * sf;
+        rulerTools.getTriangleAngleLabels(ruler).forEach((label) => {
+            const w = ctx.measureText(label.text).width;
+            const corners = [
+                { x: label.x - w / 2, y: label.y - ah / 2 }, { x: label.x + w / 2, y: label.y - ah / 2 },
+                { x: label.x - w / 2, y: label.y + ah / 2 }, { x: label.x + w / 2, y: label.y + ah / 2 },
+            ];
+            if (!insideAll(corners)) return;
+            if (!reserveBox(corners)) return;
+            ctx.fillText(label.text, label.x, label.y);
+        });
+    }
+
+    // Дальше — только экранные элементы управления, как у линейки:
+    // при сильном отдалении они прячутся.
+    if (sf > 3) return;
+
+    const handles = rulerTools.getTriangleHandles(ruler, sf);
+    const isActive = getActiveRulerForSettings() === ruler;
+
+    // Ручки поворота на концах катетов.
+    ctx.fillStyle = '#007AFF';
+    ctx.beginPath();
+    ctx.arc(handles.rotateP.x, handles.rotateP.y, 8 * sf, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(handles.rotateQ.x, handles.rotateQ.y, 8 * sf, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Ручка изменения размера на середине гипотенузы.
+    ctx.fillStyle = '#007AFF';
+    ctx.beginPath();
+    ctx.arc(handles.resize.x, handles.resize.y, 9 * sf, 0, Math.PI * 2);
+    ctx.fill();
+    drawRulerScaleGlyph(ctx, handles.resize.x, handles.resize.y, n.x, n.y, sf);
+
+    if (!isActive) {
+        drawRulerToolButton(ctx, handles.delete.x, handles.delete.y, sf, 'delete');
+        drawRulerToolButton(ctx, handles.settings.x, handles.settings.y, sf, 'settings');
+    } else {
+        // Активный инструмент подсвечивается зелёным пунктиром — как транспортир.
+        ctx.strokeStyle = 'rgba(16, 185, 129, 0.3)';
+        ctx.lineWidth = 1.5 * sf;
+        ctx.setLineDash([4 * sf, 4 * sf]);
+        ctx.beginPath();
+        ctx.moveTo(O.x, O.y);
+        ctx.lineTo(P.x, P.y);
+        ctx.lineTo(Q.x, Q.y);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
 }
 
 function drawWavyPath(ctx, points, closed = false) {
@@ -936,6 +1238,29 @@ export function drawLayer(ctx, layer, canvasState) {
             ctx.stroke();
         }
     }
+    else if (layer.type === 'formula') {
+        // Формула рисуется так же, как текст: готовый растр в рамке слоя.
+        const image = layer.cachedImage;
+        const ready = image && (
+            (typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap) ||
+            (image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0)
+        );
+        if (ready) {
+            ctx.drawImage(image, layer.x, layer.y, layer.width, layer.height);
+        } else if (!layer.isGeneratingFormula && (!canvasState || !canvasState.isInteracting)) {
+            layer.isGeneratingFormula = true;
+            renderFormulaImage(layer).then((img) => {
+                layer.isGeneratingFormula = false;
+                layer.cachedImage = img;
+                if (canvasState && canvasState.tileManager) canvasState.tileManager.invalidateLayer(layer, canvasState);
+                if (canvasState && canvasState.redraw) canvasState.redraw();
+            });
+        }
+    }
+    else if (layer.type === 'plot') {
+        const theme = (document.body && document.body.classList.contains('dark-theme')) ? 'dark' : 'light';
+        drawPlotLayer(ctx, layer, theme);
+    }
     else if (layer.type === 'text') {
         // Не рисуем текст на canvas, если он сейчас редактируется через DOM-редактор
         if (layer.isEditing) return;
@@ -1351,7 +1676,8 @@ export function drawSelectionBox(ctx, selectedLayers, canvasState) {
 
     ctx.restore();
 
-    if (isSingleSelection && !isEditingModeActive) {
+    const pivotlessSelection = isSingleSelection && layer && (layer.type === 'formula' || layer.type === 'plot');
+    if (isSingleSelection && !isEditingModeActive && !pivotlessSelection) {
         ctx.save();
         ctx.strokeStyle = '#007AFF';
         ctx.lineWidth = scaledLineWidth;
@@ -1470,11 +1796,29 @@ export function redrawCanvas(canvasState) {
         ctx.restore();
     });
 
-    drawRulers(ctx, canvasState);
-
-    // Интерфейс выделения
-    drawSelectionBox(ctx, selectedLayers, canvasState);
+    if (!canvasState.oCtx) {
+        drawRulers(ctx, canvasState);
+        drawSelectionBox(ctx, selectedLayers, canvasState);
+        drawPlotChrome(ctx, canvasState);
+    }
     ctx.restore();
+
+    // Линейки и рамка выделения — на отдельном прозрачном слое выше стикеров.
+    const oCtx = canvasState.oCtx;
+    const overlayCanvas = canvasState.overlayCanvas;
+    if (oCtx && overlayCanvas) {
+        oCtx.setTransform(1, 0, 0, 1, 0, 0);
+        oCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+        oCtx.save();
+        oCtx.scale(dpr, dpr);
+        oCtx.translate(canvasState.panX, canvasState.panY);
+        oCtx.scale(canvasState.zoom, canvasState.zoom);
+        drawRulers(oCtx, canvasState);
+        drawSelectionBox(oCtx, selectedLayers, canvasState);
+        drawPlotChrome(oCtx, canvasState);
+        drawOffPageHighlights(oCtx, canvasState);
+        oCtx.restore();
+    }
 
     if (canvasState.syncTextEditorWithCanvas) {
         canvasState.syncTextEditorWithCanvas(canvasState);
@@ -1527,6 +1871,12 @@ export function drawBackground(bgCanvas, canvasState) {
     }
 
     const { panX, panY, zoom } = canvasState;
+
+    if (canvasState.canvasMode === 'notebook') {
+        drawNotebookBackground(bgCtx, canvasState, logicalWidth, logicalHeight, style, color, theme);
+        return;
+    }
+
     // Adaptively increase spacing so background never disappears at low zoom.
     // Each doubling halves the number of drawn elements, keeping performance stable.
     let effectiveSpacing = spacing;
@@ -1538,7 +1888,32 @@ export function drawBackground(bgCanvas, canvasState) {
     const startX = panX % visualSpacing;
     const startY = panY % visualSpacing;
 
-    if (style === 'dot') {
+    if (style === 'lined') {
+        let lineStep = 24;
+        while (lineStep * zoom < 8) lineStep *= 2;
+        const visualLine = lineStep * zoom;
+        const slantStep = Math.max(28, 72 * zoom);
+        const slant = Math.tan(65 * Math.PI / 180);
+        const startLineY = panY % visualLine;
+
+        bgCtx.strokeStyle = 'rgba(96, 165, 250, 0.40)';
+        bgCtx.lineWidth = 0.8;
+        bgCtx.beginPath();
+        for (let y = startLineY; y < logicalHeight; y += visualLine) {
+            bgCtx.moveTo(0, y);
+            bgCtx.lineTo(logicalWidth, y);
+        }
+        bgCtx.stroke();
+
+        bgCtx.strokeStyle = 'rgba(96, 165, 250, 0.20)';
+        bgCtx.beginPath();
+        for (let offset = (panX % slantStep) - logicalHeight * slant; offset < logicalWidth; offset += slantStep) {
+            bgCtx.moveTo(offset, logicalHeight);
+            bgCtx.lineTo(offset + logicalHeight * slant, 0);
+        }
+        bgCtx.stroke();
+    }
+    else if (style === 'dot') {
         bgCtx.fillStyle = color;
         // Use fillRect instead of arc — no beginPath/fill per dot, vastly faster
         for (let x = startX; x < logicalWidth; x += visualSpacing) {
@@ -1562,6 +1937,202 @@ export function drawBackground(bgCanvas, canvasState) {
         }
         bgCtx.stroke();
     }
+
+    drawPageGuides(bgCtx, canvasState, logicalWidth, logicalHeight);
+}
+
+function drawPageGrid(ctx, x, y, width, height, style, color, zoom) {
+    let step = 20;
+    while (step * zoom < 8) step *= 2;
+    const visualStep = step * zoom;
+    if (visualStep < 4) return;
+
+    if (style === 'lined') {
+        // Тетрадь в линейку: горизонтальные строки и наклонные направляющие.
+        const lineStep = Math.max(10, 24 * zoom);
+        const slantStep = Math.max(28, 72 * zoom);
+        const slant = Math.tan(65 * Math.PI / 180);
+        ctx.strokeStyle = 'rgba(96, 165, 250, 0.45)';
+        ctx.lineWidth = 0.8;
+
+        ctx.beginPath();
+        for (let py = y + lineStep; py < y + height; py += lineStep) {
+            ctx.moveTo(x, py);
+            ctx.lineTo(x + width, py);
+        }
+        ctx.stroke();
+
+        ctx.strokeStyle = 'rgba(96, 165, 250, 0.26)';
+        ctx.beginPath();
+        for (let offset = x - height * slant; offset <= x + width; offset += slantStep) {
+            ctx.moveTo(offset, y + height);
+            ctx.lineTo(offset + height * slant, y);
+        }
+        ctx.stroke();
+        return;
+    }
+
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 0.5;
+
+    if (style === 'dot') {
+        for (let px = x; px <= x + width; px += visualStep) {
+            for (let py = y; py <= y + height; py += visualStep) {
+                ctx.fillRect(px - 0.5, py - 0.5, 1, 1);
+            }
+        }
+        return;
+    }
+
+    ctx.beginPath();
+    for (let px = x; px <= x + width; px += visualStep) {
+        ctx.moveTo(px, y);
+        ctx.lineTo(px, y + height);
+    }
+    for (let py = y; py <= y + height; py += visualStep) {
+        ctx.moveTo(x, py);
+        ctx.lineTo(x + width, py);
+    }
+    ctx.stroke();
+}
+
+function getPageOrderMap(state) {
+    const boxes = [];
+    (state.layers || []).forEach(layer => {
+        if (layer.isEditing) return;
+        const box = getBoundingBox(layer);
+        if (box) boxes.push(box);
+    });
+    const app = window.stickerApp;
+    if (app && Array.isArray(app.stickers)) {
+        app.stickers.forEach(s => boxes.push({ x: s.x, y: s.y, width: s.w, height: s.h }));
+    }
+    const map = new Map();
+    orderFilledPages(boxes, getPageLayout(state)).forEach(page => {
+        map.set(getPageKeyFromRect(page), page.order);
+    });
+    return map;
+}
+
+function drawNotebookBackground(ctx, state, logicalWidth, logicalHeight, style, color, theme) {
+    const dark = theme === 'dark';
+    const layout = getPageLayout(state);
+    const zoom = state.zoom || 1;
+    const panX = state.panX || 0;
+    const panY = state.panY || 0;
+    const pageOrder = getPageOrderMap(state);
+
+    ctx.fillStyle = dark ? '#141a24' : '#e8ecf2';
+    ctx.fillRect(0, 0, logicalWidth, logicalHeight);
+
+    getNotebookPageRects(state, logicalHeight).forEach(page => {
+        const x = panX + page.x * zoom;
+        const y = panY + page.y * zoom;
+        const width = page.width * zoom;
+        const height = page.height * zoom;
+        if (y > logicalHeight || y + height < 0 || x > logicalWidth || x + width < 0) return;
+
+        // Тень и лист
+        ctx.fillStyle = dark ? 'rgba(0, 0, 0, 0.45)' : 'rgba(40, 52, 70, 0.16)';
+        ctx.fillRect(x + 2, y + 3, width, height);
+
+        ctx.fillStyle = dark ? '#273142' : '#ffffff';
+        ctx.fillRect(x, y, width, height);
+
+        // Клетка/линейка только внутри листа
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x, y, width, height);
+        ctx.clip();
+        drawPageGrid(ctx, x, y, width, height, style, dark ? '#3b4658' : '#dfe3e8', zoom);
+        ctx.restore();
+
+        if (state.showPageGuides !== false) {
+            ctx.strokeStyle = dark ? 'rgba(255,255,255,0.12)' : 'rgba(30, 41, 59, 0.16)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x + 0.5, y + 0.5, Math.max(0, width - 1), Math.max(0, height - 1));
+        }
+
+        const order = pageOrder.get(getPageKeyFromRect(page));
+        if (order && width > 60 && height > 40) {
+            ctx.fillStyle = dark ? '#6b7280' : '#94a3b8';
+            ctx.font = '12px Arial, sans-serif';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(String(order), x + width - 10, y + height - 8);
+        }
+    });
+}
+
+function drawPageGuides(ctx, state, logicalWidth, logicalHeight) {
+    if (!state || state.canvasMode !== 'infinite' || state.showPageGuides === false) return;
+    const layout = getPageLayout(state);
+    const zoom = state.zoom || 1;
+    const panX = state.panX || 0;
+    const panY = state.panY || 0;
+    const dark = document.body.classList.contains('dark-theme');
+
+    ctx.save();
+    ctx.strokeStyle = dark ? 'rgba(148, 163, 184, 0.18)' : 'rgba(100, 116, 139, 0.18)';
+    ctx.lineWidth = 1;
+
+    // Вертикальные и горизонтальные границы страниц.
+    const leftWorld = -panX / zoom;
+    const rightWorld = (logicalWidth - panX) / zoom;
+    const topWorld = -panY / zoom;
+    const bottomWorld = (logicalHeight - panY) / zoom;
+    const startCol = Math.floor(leftWorld / layout.width) - 1;
+    const endCol = Math.floor(rightWorld / layout.width) + 1;
+    const startRow = Math.floor(topWorld / layout.height) - 1;
+    const endRow = Math.floor(bottomWorld / layout.height) + 1;
+
+    for (let col = startCol; col <= endCol; col++) {
+        const x = panX + col * layout.width * zoom;
+        if (x < 0 || x > logicalWidth) continue;
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, logicalHeight);
+        ctx.stroke();
+    }
+    for (let row = startRow; row <= endRow; row++) {
+        const y = panY + row * layout.height * zoom;
+        if (y < 0 || y > logicalHeight) continue;
+        ctx.beginPath();
+        ctx.moveTo(0, y + 0.5);
+        ctx.lineTo(logicalWidth, y + 0.5);
+        ctx.stroke();
+    }
+
+    ctx.restore();
+}
+
+// Объекты, оказавшиеся вне листов, не скрываем — только помечаем янтарной рамкой.
+export function drawOffPageHighlights(ctx, state) {
+    if (!state || state.canvasMode !== 'notebook') return;
+    const layout = getPageLayout(state);
+    const zoom = state.zoom || 1;
+
+    ctx.save();
+    ctx.setLineDash([6 / zoom, 4 / zoom]);
+    ctx.lineWidth = 1.5 / zoom;
+    ctx.strokeStyle = 'rgba(245, 158, 11, 0.95)';
+
+    (state.layers || []).forEach(layer => {
+        if (layer.isEditing) return;
+        const box = getBoundingBox(layer);
+        if (!box) return;
+        const page = getPageAt({ x: box.x + box.width / 2, y: box.y + box.height / 2 }, layout);
+        if (!page) return;
+        const inside = box.x >= page.x &&
+            box.x + box.width <= page.x + page.width &&
+            box.y >= page.y &&
+            box.y + box.height <= page.y + page.height;
+        if (inside) return;
+        const pad = 3 / zoom;
+        ctx.strokeRect(box.x - pad, box.y - pad, box.width + pad * 2, box.height + pad * 2);
+    });
+    ctx.restore();
 }
 // --- END OF FILE js/renderer.js ---
 

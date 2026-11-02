@@ -1,19 +1,23 @@
 // --- START OF FILE js/main.js ---
 
-import { initializeCanvas } from './canvas.js?v=1.2.6';
-import { initializeToolbar } from './toolbar.js?v=1.2.6';
-import { getEditorTextarea } from './text.js?v=1.2.6';
-import { redrawCanvas, drawBackground, drawLoadingPlaceholders } from './renderer.js?v=1.2.6';
-import * as history from './history.js?v=1.2.6';
-import { initializeEventListeners, copySelectionToClipboard, pasteFromClipboard } from './events.js?v=1.2.6';
-import { initializeFileHandlers } from './file.js?v=1.2.6';
-import * as utils from './utils.js?v=1.2.6';
-import { mediaCache } from './utils.js?v=1.2.6';
-import { loadStateFromDB } from './persist.js?v=1.2.6';
-import * as textTool from './text.js?v=1.2.6';
-import { updateCursor, loadIconCursors } from './ui.js?v=1.2.6';
-import helpContent from './help-content.js?v=1.2.6';
-import { StickerApp, syncStickersWithCanvas } from './sticker.js?v=1.2.6';
+import { initializeCanvas } from './canvas.js?v=1.4.19';
+import { initializeToolbar } from './toolbar.js?v=1.4.19';
+import { getEditorTextarea } from './text.js?v=1.4.19';
+import { redrawCanvas, drawBackground, drawLoadingPlaceholders, drawRulers, drawSelectionBox } from './renderer.js?v=1.4.19';
+import * as history from './history.js?v=1.4.19';
+import { initializeEventListeners, copySelectionToClipboard, pasteFromClipboard } from './events.js?v=1.4.19';
+import { initializeFileHandlers } from './file.js?v=1.4.19';
+import * as utils from './utils.js?v=1.4.19';
+import { mediaCache } from './utils.js?v=1.4.19';
+import { loadStateFromDB } from './persist.js?v=1.4.19';
+import * as textTool from './text.js?v=1.4.19';
+import { updateCursor, loadIconCursors } from './ui.js?v=1.4.19';
+import helpContent from './help-content.js?v=1.4.19';
+import { StickerApp, syncStickersWithCanvas } from './sticker.js?v=1.4.19';
+import { getBoundingBox } from './geometry.js?v=1.4.19';
+import { getPageLayout, orderFilledPages, getPageKey, getPageAt, clampNotebookView } from './pages.js?v=1.4.19';
+import * as formulaLayer from './formulaLayer.js?v=1.4.19';
+import { openMathEditor } from './mathEditor.js?v=1.4.19';
 
 document.addEventListener('DOMContentLoaded', () => {
     // ... (без изменений до loadState) ...
@@ -196,8 +200,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const height = window.innerHeight;
         const dpr = window.devicePixelRatio || 1;
         const cacheCanvas = document.getElementById('cacheCanvas');
+        const overlayCanvas = document.getElementById('overlayCanvas');
 
-        [backgroundCanvas, drawingCanvas, interactionCanvas, cacheCanvas].forEach(c => {
+        [backgroundCanvas, drawingCanvas, interactionCanvas, cacheCanvas, overlayCanvas].forEach(c => {
             c.width = width * dpr;
             c.height = height * dpr;
             c.style.width = `${width}px`;
@@ -212,7 +217,183 @@ document.addEventListener('DOMContentLoaded', () => {
         if (canvasState) redraw();
     };
 
+    let pageNavPages = [];
+    let pageNavIndex = 0;
+
+    function reflowToNotebook() {
+        if (!canvasState || canvasState.canvasMode !== 'notebook' || canvasState._notebookReflowed) return;
+        const layout = getPageLayout(canvasState);
+        const pages = getFilledPagesForNavigator();
+        if (pages.length === 0) {
+            canvasState._notebookReflowed = true;
+            return;
+        }
+
+        // Каждая заполненная страница из двумерной сетки получает свой
+        // вертикальный лист. Объекты этой страницы сдвигаются на новый лист.
+        const targets = new Map();
+        pages.forEach((page, index) => {
+            targets.set(getPageKey(page.col, page.row), index * layout.height);
+        });
+        const layerOffsets = new Map();
+
+        const offsetForBox = (box) => {
+            const source = getPageAt({ x: box.x + box.width / 2, y: box.y + box.height / 2 }, layout);
+            if (!source) return null;
+            const targetY = targets.get(getPageKey(source.col, source.row));
+            if (targetY === undefined) return null;
+            return { dx: -source.x, dy: targetY - source.y };
+        };
+
+        (canvasState.layers || []).forEach(layer => {
+            if (layer.isEditing) return;
+            const box = getBoundingBox(layer);
+            if (!box) return;
+            const offset = offsetForBox(box);
+            if (!offset || (!offset.dx && !offset.dy)) return;
+            utils.translateLayer(layer, offset.dx, offset.dy);
+            layerOffsets.set(layer.id, offset);
+        });
+
+        if (window.stickerApp && Array.isArray(window.stickerApp.stickers)) {
+            window.stickerApp.stickers.forEach(s => {
+                const offset = layerOffsets.get(s.id);
+                if (!offset) return;
+                s.x += offset.dx;
+                s.y += offset.dy;
+                if (s.element) {
+                    s.element.style.left = `${s.x}px`;
+                    s.element.style.top = `${s.y}px`;
+                }
+            });
+        }
+
+        if (canvasState.tileManager) canvasState.tileManager.clear();
+        if (canvasState.spatialGrid) canvasState.spatialGrid = utils.buildSpatialGrid(canvasState.layers);
+        if (canvasState.layerBBoxCache) canvasState.layerBBoxCache.clear();
+        canvasState._notebookReflowed = true;
+    }
+
+    function getFilledPagesForNavigator() {
+        const boxes = [];
+        (canvasState.layers || []).forEach(layer => {
+            if (layer.isEditing) return;
+            const box = getBoundingBox(layer);
+            if (box) boxes.push(box);
+        });
+        if (window.stickerApp && Array.isArray(window.stickerApp.stickers)) {
+            window.stickerApp.stickers.forEach(s => boxes.push({ x: s.x, y: s.y, width: s.w, height: s.h }));
+        }
+        return orderFilledPages(boxes, getPageLayout(canvasState));
+    }
+
+    function centerNotebookPage(page, fit = true) {
+        if (!canvasState || canvasState.canvasMode !== 'notebook') return;
+        const dpr = window.devicePixelRatio || 1;
+        const viewW = canvasState.canvas.width / dpr;
+        const viewH = canvasState.canvas.height / dpr;
+        let zoom = canvasState.zoom;
+        if (fit) {
+            const fitZoom = Math.min((viewW - 60) / page.width, (viewH - 150) / page.height);
+            zoom = Math.max(0.2, Math.min(1.8, fitZoom));
+        }
+        canvasState.zoom = zoom;
+        canvasState.panX = viewW / 2 - (page.x + page.width / 2) * zoom;
+        canvasState.panY = viewH / 2 - (page.y + page.height / 2) * zoom;
+        if (canvasState.saveViewState) canvasState.saveViewState();
+        redraw();
+    }
+
+    function updatePageNavigator() {
+        const nav = document.getElementById('page-navigator');
+        if (!nav || !canvasState) return;
+        if (canvasState.canvasMode !== 'notebook') {
+            nav.classList.add('hidden');
+            return;
+        }
+        pageNavPages = getFilledPagesForNavigator();
+        const dpr = window.devicePixelRatio || 1;
+        const viewW = canvasState.canvas.width / dpr;
+        const viewH = canvasState.canvas.height / dpr;
+        const center = {
+            x: (viewW / 2 - canvasState.panX) / canvasState.zoom,
+            y: (viewH / 2 - canvasState.panY) / canvasState.zoom
+        };
+        let idx = pageNavPages.findIndex(p =>
+            center.x >= p.x && center.x <= p.x + p.width &&
+            center.y >= p.y && center.y <= p.y + p.height
+        );
+        if (idx === -1 && pageNavPages.length > 0) {
+            idx = 0;
+            let best = Infinity;
+            pageNavPages.forEach((p, i) => {
+                const dx = Math.max(p.x - center.x, 0, center.x - (p.x + p.width));
+                const dy = Math.max(p.y - center.y, 0, center.y - (p.y + p.height));
+                const dist = Math.hypot(dx, dy);
+                if (dist < best) { best = dist; idx = i; }
+            });
+        }
+        pageNavIndex = Math.max(0, idx);
+        const indicator = document.getElementById('pageIndicator');
+        if (indicator) {
+            indicator.textContent = pageNavPages.length
+                ? `${pageNavIndex + 1} / ${pageNavPages.length}`
+                : '0 / 0';
+        }
+        nav.classList.remove('hidden');
+        const prev = document.getElementById('pagePrevBtn');
+        const next = document.getElementById('pageNextBtn');
+        if (prev) prev.disabled = pageNavPages.length === 0;
+        if (next) next.disabled = pageNavPages.length === 0;
+    }
+
+    function ensureNotebookPageVisible() {
+        if (!canvasState || canvasState.canvasMode !== 'notebook') return;
+        const pages = getFilledPagesForNavigator();
+        if (pages.length === 0) return;
+        const dpr = window.devicePixelRatio || 1;
+        const viewW = canvasState.canvas.width / dpr;
+        const viewH = canvasState.canvas.height / dpr;
+        const left = -canvasState.panX / canvasState.zoom;
+        const right = (viewW - canvasState.panX) / canvasState.zoom;
+        const top = -canvasState.panY / canvasState.zoom;
+        const bottom = (viewH - canvasState.panY) / canvasState.zoom;
+        const visible = pages.some(p =>
+            p.x < right && p.x + p.width > left &&
+            p.y < bottom && p.y + p.height > top
+        );
+        if (!visible) centerNotebookPage(pages[0]);
+    }
+
+    function initializePageNavigator() {
+        const first = document.getElementById('pageFirstBtn');
+        const prev = document.getElementById('pagePrevBtn');
+        const next = document.getElementById('pageNextBtn');
+        const fit = document.getElementById('pageFitBtn');
+
+        if (first) first.addEventListener('click', () => {
+            if (pageNavPages.length) centerNotebookPage(pageNavPages[0]);
+        });
+        if (prev) prev.addEventListener('click', () => {
+            if (!pageNavPages.length) return;
+            pageNavIndex = (pageNavIndex - 1 + pageNavPages.length) % pageNavPages.length;
+            centerNotebookPage(pageNavPages[pageNavIndex]);
+        });
+        if (next) next.addEventListener('click', () => {
+            if (!pageNavPages.length) return;
+            pageNavIndex = (pageNavIndex + 1) % pageNavPages.length;
+            centerNotebookPage(pageNavPages[pageNavIndex]);
+        });
+        if (fit) fit.addEventListener('click', () => {
+            if (pageNavPages.length) centerNotebookPage(pageNavPages[pageNavIndex]);
+        });
+    }
+
     const redraw = () => {
+        if (canvasState.canvasMode === 'notebook') {
+            const dpr = window.devicePixelRatio || 1;
+            clampNotebookView(canvasState, canvasState.canvas.width / dpr, canvasState.canvas.height / dpr);
+        }
         redrawCanvas(canvasState);
         drawBackground(backgroundCanvas, canvasState);
         syncStickersWithCanvas(canvasState);
@@ -561,6 +742,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 canvasState.panY = viewState.panY || 0;
                 canvasState.zoom = viewState.zoom || 1;
                 canvasState.rulers = viewState.rulers || [];
+                canvasState.canvasMode = viewState.canvasMode || localStorage.getItem('boardCanvasMode') || 'infinite';
+                canvasState.pageFormat = viewState.pageFormat || localStorage.getItem('boardPageFormat') || 'A4';
+                canvasState.pageOrientation = viewState.pageOrientation || localStorage.getItem('boardPageOrientation') || 'portrait';
+                canvasState.showPageGuides = viewState.showPageGuides !== false && localStorage.getItem('boardShowPageGuides') !== 'false';
+                canvasState._notebookReflowed = false;
 
                 const rehydratePromise = utils.rehydrateLayers(layersToLoad);
                 liveLayers = await Promise.race([
@@ -577,6 +763,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         canvasState.layers = liveLayers;
 
+        // Формулы хранятся как дерево, картинка-кэш пересобирается при загрузке.
+        formulaLayer.ensureFormulaImages(canvasState);
+
         if (canvasState.tileManager) {
             canvasState.tileManager.clear();
         }
@@ -584,6 +773,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // --- ИЗМЕНЕНИЕ: Инициализация Spatial Grid при загрузке ---
         canvasState.spatialGrid = utils.buildSpatialGrid(liveLayers);
         // -----------------------------------------------------------
+        if (canvasState.canvasMode === 'notebook') {
+            canvasState._notebookReflowed = false;
+            reflowToNotebook();
+        }
 
         if (window.stickerApp) {
             window.stickerApp.loadStickersAndLinks(canvasState.layers, loadedData?.viewState?.stickerLinks);
@@ -591,6 +784,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         history.initHistory(canvasState, liveLayers);
         redraw();
+        if (canvasState.canvasMode === 'notebook') ensureNotebookPageVisible();
         updateUndoRedoButtons();
 
         // Скрыть прелоадер только после того, как все загружено и отрисовано
@@ -603,6 +797,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 loader.remove();
             }, { once: true });
         }
+
+        setTimeout(() => {
+            if (typeof showCanvasOnboarding === 'function') showCanvasOnboarding();
+        }, 500);
     }
 
     function checkUiLayout() {
@@ -623,6 +821,8 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeFloatingSelectionToolbar();
     initializeFloatingPdfToolbar();
     initializeFloatingCurveToolbar();
+    initializeFloatingFormulaToolbar();
+    initializeFloatingPlotToolbar();
     initializeMobileTextSubToolbar();
 
     canvasState = initializeCanvas(
@@ -688,8 +888,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const hasLaserStrokes = canvasState.laserStrokes && canvasState.laserStrokes.some(s => s.points && s.points.length > 0);
 
             if (hasLaserPointer || hasLaserStrokes) {
-                const iCanvas = canvasState.interactionCanvas;
-                const iCtx = canvasState.iCtx;
+                const iCanvas = canvasState.overlayCanvas;
+                const iCtx = canvasState.oCtx;
+                if (!iCanvas || !iCtx) {
+                    laserAnimationFrameId = null;
+                    return;
+                }
                 const dpr = window.devicePixelRatio || 1;
 
                 iCtx.setTransform(1, 0, 0, 1, 0, 0);
@@ -699,6 +903,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 iCtx.scale(dpr, dpr);
                 iCtx.translate(canvasState.panX, canvasState.panY);
                 iCtx.scale(canvasState.zoom, canvasState.zoom);
+
+                // Лазер живёт на том же слое, что линейки и рамка выделения,
+                // поэтому перерисовываем их каждый кадр, чтобы не потерять.
+                drawRulers(iCtx, canvasState);
+                drawSelectionBox(iCtx, canvasState.selectedLayers, canvasState);
 
                 const now = Date.now();
                 const HOLD_MS = 800;
@@ -794,12 +1003,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 laserAnimationFrameId = requestAnimationFrame(loop);
             } else {
-                // Done - clear interaction canvas and stop animation loop
-                const iCanvas = canvasState.interactionCanvas;
-                const iCtx = canvasState.iCtx;
-                iCtx.setTransform(1, 0, 0, 1, 0, 0);
-                iCtx.clearRect(0, 0, iCanvas.width, iCanvas.height);
+                // Лазер закончился — очищаем overlay и возвращаем линейки/рамку.
+                const iCanvas = canvasState.overlayCanvas;
+                const iCtx = canvasState.oCtx;
+                if (iCtx && iCanvas) {
+                    iCtx.setTransform(1, 0, 0, 1, 0, 0);
+                    iCtx.clearRect(0, 0, iCanvas.width, iCanvas.height);
+                }
                 laserAnimationFrameId = null;
+                if (canvasState.redraw) canvasState.redraw();
             }
         };
         loop();
@@ -829,6 +1041,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     initializeToolbar(canvasState, redraw, updateSubToolbarVisibility, { ...eventHandlers, performDeleteSelected, performDeleteSelectedCurveNode });
+    canvasState.showCanvasOnboarding = showCanvasOnboarding;
     initializeCustomTooltips();
     initializeEventListeners(canvasState, { ...eventHandlers, performDeleteSelected, performDeleteSelectedCurveNode });
     initializeFileHandlers(canvasState, loadState, redraw, commitChange);
@@ -847,6 +1060,26 @@ document.addEventListener('DOMContentLoaded', () => {
     loadIconCursors(canvasState);
 
     // ... (остальные функции initializeFloatingTextToolbar и т.д. без изменений) ...
+    // Формула в тексте: окно ввода, затем вставка в каретку (или отдельным объектом).
+    function openTextFormulaDialog() {
+        // Из режима текста график не строим: окно закрывалось бы вместе с
+        // редактированием. График можно построить потом кнопкой у формулы.
+        openMathEditor({
+            title: 'Формула в тексте',
+            hint: 'Формула вставится в текст на место курсора.',
+            showGraph: false,
+            onSubmit: ({ math }) => {
+                const inserted = textTool.insertFormula(math, canvasState);
+                if (!inserted) {
+                    const dpr = window.devicePixelRatio || 1;
+                    const cx = ((canvasState.canvas.width / dpr) / 2 - canvasState.panX) / canvasState.zoom;
+                    const cy = ((canvasState.canvas.height / dpr) / 2 - canvasState.panY) / canvasState.zoom;
+                    formulaLayer.insertFormulaLayer(canvasState, math, { x: cx, y: cy });
+                }
+            },
+        });
+    }
+
     function initializeFloatingTextToolbar() {
         // ... (код функции) ...
         const toolbar = document.getElementById('floating-text-toolbar');
@@ -1060,6 +1293,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     canvasState.updateFloatingToolbar();
                     redraw();
                 }
+                return;
+            }
+
+            if (action === 'insert-formula') {
+                e.preventDefault();
+                openTextFormulaDialog();
                 return;
             }
 
@@ -1304,6 +1543,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
+            if (action === 'insert-formula') {
+                e.preventDefault();
+                openTextFormulaDialog();
+                return;
+            }
+
             applyTextChange(layer => {
                 if (canvasState.isEditingText) {
                     switch (action) {
@@ -1530,6 +1775,90 @@ document.addEventListener('DOMContentLoaded', () => {
         document.addEventListener('click', e => {
             if (!mobileTextToolbar.contains(e.target)) {
                 mobileTextToolbar.querySelectorAll('.dropdown-container').forEach(d => d.classList.remove('active'));
+            }
+        });
+    }
+
+    // Панель выделенной формулы: изменить, построить график, удалить.
+    function initializeFloatingFormulaToolbar() {
+        const toolbar = document.getElementById('floating-formula-toolbar');
+        if (!toolbar) return;
+
+        toolbar.addEventListener('click', (e) => {
+            const button = e.target.closest('button');
+            if (!button) return;
+            const action = button.dataset.action;
+
+            const layer = (canvasState.selectedLayers.length === 1 && canvasState.selectedLayers[0].type === 'formula')
+                ? canvasState.selectedLayers[0]
+                : null;
+            if (!layer) return;
+
+            if (action === 'edit-formula') {
+                formulaLayer.openEditFormulaDialog(canvasState, layer);
+                return;
+            }
+
+            if (action === 'graph-formula') {
+                import('./plotLayer.js?v=1.4.19').then((plot) => {
+                    plot.insertPlotFromMath(canvasState, layer.math, {
+                        x: layer.x + (layer.width || 200) + 320,
+                        y: layer.y + 210,
+                    });
+                }).catch(() => {});
+                return;
+            }
+
+            if (action === 'copy') {
+                copySelectionToClipboard(canvasState, false);
+                return;
+            }
+
+            if (action === 'delete') {
+                canvasState.layers = canvasState.layers.filter((l) => l.id !== layer.id);
+                canvasState.selectedLayers = [];
+                if (canvasState.tileManager) canvasState.tileManager.clear();
+                if (canvasState.saveState) canvasState.saveState({ type: 'deletion', before: [layer], after: [] });
+                if (canvasState.saveViewState) canvasState.saveViewState();
+                if (canvasState.updateFloatingToolbar) canvasState.updateFloatingToolbar();
+                redraw();
+            }
+        });
+    }
+
+    // Панель выделенного графика: настройки, копирование, удаление.
+    function initializeFloatingPlotToolbar() {
+        const toolbar = document.getElementById('floating-plot-toolbar');
+        if (!toolbar) return;
+
+        toolbar.addEventListener('click', (e) => {
+            const button = e.target.closest('button');
+            if (!button) return;
+            const action = button.dataset.action;
+
+            const layer = (canvasState.selectedLayers.length === 1 && canvasState.selectedLayers[0].type === 'plot')
+                ? canvasState.selectedLayers[0]
+                : null;
+            if (!layer) return;
+
+            if (action === 'plot-settings') {
+                import('./plotLayer.js?v=1.4.19').then((plot) => plot.openPlotEditor(canvasState, layer)).catch(() => {});
+                return;
+            }
+
+            if (action === 'copy') {
+                copySelectionToClipboard(canvasState, false);
+                return;
+            }
+
+            if (action === 'delete') {
+                canvasState.layers = canvasState.layers.filter((l) => l.id !== layer.id);
+                canvasState.selectedLayers = [];
+                if (canvasState.tileManager) canvasState.tileManager.clear();
+                if (canvasState.saveState) canvasState.saveState({ type: 'deletion', before: [layer], after: [] });
+                if (canvasState.saveViewState) canvasState.saveViewState();
+                if (canvasState.updateFloatingToolbar) canvasState.updateFloatingToolbar();
+                redraw();
             }
         });
     }
@@ -2045,6 +2374,90 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function showCanvasOnboarding(options = {}) {
+        const modal = document.getElementById('canvas-onboarding');
+        if (!modal) return;
+        const fromClear = !!options.fromClear;
+        if (!fromClear && localStorage.getItem('boardOnboardingDone') === 'true') return;
+
+        const cards = modal.querySelectorAll('.onboarding-card');
+        const bgSelect = document.getElementById('onboardingBg');
+        const formatSelect = document.getElementById('onboardingFormat');
+        const orientationSelect = document.getElementById('onboardingOrientation');
+        const createBtn = document.getElementById('onboardingCreate');
+        const clearOption = document.getElementById('onboardingClearOption');
+        const showOnClear = document.getElementById('onboardingShowOnClear');
+        const showGuidesRow = document.getElementById('onboardingShowGuidesRow');
+        const showGuides = document.getElementById('onboardingShowGuides');
+        const headerTitle = modal.querySelector('.onboarding-header h3');
+        const headerText = modal.querySelector('.onboarding-header p');
+
+        if (fromClear) {
+            if (headerTitle) headerTitle.textContent = 'Какой холст создать?';
+            if (headerText) headerText.textContent = 'Доска очищена. Выберите формат нового холста.';
+            if (clearOption) clearOption.style.display = 'flex';
+            if (showOnClear) showOnClear.checked = localStorage.getItem('boardShowCanvasOnClear') !== 'false';
+        } else {
+            if (headerTitle) headerTitle.textContent = 'Какой холст вам нужен?';
+            if (headerText) headerText.textContent = 'Это можно изменить позже в настройках.';
+            if (clearOption) clearOption.style.display = 'none';
+        }
+
+        let selectedMode = (canvasState && canvasState.canvasMode) || localStorage.getItem('boardCanvasMode') || 'infinite';
+        if (bgSelect) bgSelect.value = localStorage.getItem('boardBackgroundStyle') || 'grid';
+        if (formatSelect) formatSelect.value = (canvasState && canvasState.pageFormat) || localStorage.getItem('boardPageFormat') || 'A4';
+        if (orientationSelect) orientationSelect.value = (canvasState && canvasState.pageOrientation) || localStorage.getItem('boardPageOrientation') || 'portrait';
+        if (showGuides) showGuides.checked = (canvasState ? canvasState.showPageGuides !== false : true) &&
+            localStorage.getItem('boardShowPageGuides') !== 'false';
+
+        const selectMode = (mode) => {
+            selectedMode = mode;
+            cards.forEach(card => card.classList.toggle('active', card.dataset.mode === mode));
+            if (showGuidesRow) showGuidesRow.style.display = mode === 'infinite' ? 'flex' : 'none';
+        };
+        cards.forEach(card => {
+            card.onclick = () => selectMode(card.dataset.mode);
+        });
+        selectMode(selectedMode);
+
+        const close = () => {
+            modal.classList.add('hidden');
+            modal.classList.remove('active');
+        };
+
+        createBtn.onclick = () => {
+            if (!canvasState) return;
+            canvasState.canvasMode = selectedMode;
+            canvasState.pageFormat = formatSelect.value;
+            canvasState.pageOrientation = orientationSelect.value;
+            localStorage.setItem('boardCanvasMode', canvasState.canvasMode);
+            localStorage.setItem('boardPageFormat', canvasState.pageFormat);
+            localStorage.setItem('boardPageOrientation', canvasState.pageOrientation);
+            localStorage.setItem('boardBackgroundStyle', bgSelect.value);
+            if (selectedMode === 'infinite' && showGuides) {
+                canvasState.showPageGuides = showGuides.checked;
+                localStorage.setItem('boardShowPageGuides', showGuides.checked ? 'true' : 'false');
+            }
+            localStorage.setItem('boardOnboardingDone', 'true');
+            if (fromClear && showOnClear) {
+                localStorage.setItem('boardShowCanvasOnClear', showOnClear.checked ? 'true' : 'false');
+            }
+            if (canvasState.canvasMode === 'notebook') {
+                canvasState._notebookReflowed = false;
+                reflowToNotebook();
+            } else {
+                canvasState._notebookReflowed = false;
+            }
+            if (canvasState.saveViewState) canvasState.saveViewState();
+            redraw();
+            if (canvasState.canvasMode === 'notebook') ensureNotebookPageVisible();
+            close();
+        };
+
+        modal.classList.remove('hidden');
+        modal.classList.add('active');
+    }
+
     function initializeSettingsModal(canvasState, redraw, updateSubToolbarVisibility) {
         const settingsBtn = document.getElementById('settingsBtn');
         const settingsModal = document.getElementById('settings-modal');
@@ -2062,6 +2475,7 @@ document.addEventListener('DOMContentLoaded', () => {
             themeDark.classList.remove('active');
             selectedTheme = 'light';
             document.body.classList.remove('dark-theme');
+            if (canvasState && canvasState.tileManager) canvasState.tileManager.clear();
             redraw();
         });
 
@@ -2070,6 +2484,7 @@ document.addEventListener('DOMContentLoaded', () => {
             themeLight.classList.remove('active');
             selectedTheme = 'dark';
             document.body.classList.add('dark-theme');
+            if (canvasState && canvasState.tileManager) canvasState.tileManager.clear();
             redraw();
         });
 
@@ -2096,24 +2511,61 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         // Setup Custom Dropdown
+        function closeAllDropdownPortals() {
+            document.querySelectorAll('.dropdown-list.dropdown-portal').forEach(list => {
+                const owner = list._ownerDropdown;
+                if (owner) {
+                    owner.classList.remove('open');
+                    owner.appendChild(list);
+                }
+                list.classList.remove('dropdown-portal');
+                list.style.cssText = '';
+            });
+        }
+
         function setupDropdown(dropdownId, defaultVal) {
             const dropdown = document.getElementById(dropdownId);
             if (!dropdown) return { getValue: () => defaultVal, setValue: () => {} };
             
             const header = dropdown.querySelector('.dropdown-header');
             const label = header.querySelector('.dropdown-label');
-            const itemsContainer = dropdown.querySelector('.dropdown-list');
+            const list = dropdown.querySelector('.dropdown-list');
             const items = dropdown.querySelectorAll('.dropdown-item');
             
             let currentValue = defaultVal;
 
+            const close = () => {
+                dropdown.classList.remove('open');
+                if (list.parentNode !== dropdown) dropdown.appendChild(list);
+                list.classList.remove('dropdown-portal');
+                list.style.cssText = '';
+            };
+
+            const open = () => {
+                closeAllDropdownPortals();
+                dropdown.classList.add('open');
+                list._ownerDropdown = dropdown;
+                document.body.appendChild(list);
+                list.classList.add('dropdown-portal');
+
+                const rect = header.getBoundingClientRect();
+                const width = Math.max(rect.width, 170);
+                list.style.width = `${width}px`;
+                list.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
+                list.style.right = 'auto';
+                list.style.top = '0px';
+                const listHeight = list.offsetHeight;
+                let top = rect.bottom + 8;
+                if (top + listHeight > window.innerHeight - 8) {
+                    top = rect.top - listHeight - 8;
+                }
+                list.style.top = `${Math.max(8, top)}px`;
+            };
+
             header.addEventListener('click', (e) => {
                 e.stopPropagation();
-                // Close others
-                document.querySelectorAll('.custom-dropdown').forEach(d => {
-                    if (d !== dropdown) d.classList.remove('open');
-                });
-                dropdown.classList.toggle('open');
+                if (dropdown.classList.contains('open')) close();
+                else open();
             });
 
             items.forEach(item => {
@@ -2123,7 +2575,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     item.classList.add('active');
                     currentValue = item.dataset.value;
                     label.textContent = item.textContent;
-                    dropdown.classList.remove('open');
+                    close();
                 });
             });
 
@@ -2142,15 +2594,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const bgDropdown = setupDropdown('dropdown-bg', 'grid');
+        const canvasModeSelect = setupDropdown('settingsCanvasModeDropdown', 'infinite');
+        const pageFormatSelect = setupDropdown('settingsPageFormatDropdown', 'A4');
+        const pageOrientationSelect = setupDropdown('settingsPageOrientationDropdown', 'portrait');
+        const showPageGuidesToggle = document.getElementById('settingsShowPageGuides');
+        const askCanvasOnClearToggle = document.getElementById('settingsAskCanvasOnClear');
         const snapDropdown = setupDropdown('dropdown-snap', 'auto');
 
         // Close dropdowns on outside click
         document.addEventListener('click', () => {
             document.querySelectorAll('.custom-dropdown').forEach(d => d.classList.remove('open'));
+            closeAllDropdownPortals();
         });
+        window.addEventListener('resize', closeAllDropdownPortals);
+        window.addEventListener('scroll', closeAllDropdownPortals, true);
 
         const smoothingSlider = document.getElementById('smoothing-slider');
         const smoothingValue = document.getElementById('smoothing-value');
+        const autoFormulaToggle = document.getElementById('auto-formula-toggle');
         const proportionalScaleToggle = document.getElementById('proportional-scale-toggle');
         const snapToRulerToggle = document.getElementById('snap-to-ruler-toggle');
         const transparencyToggle = document.getElementById('transparency-toggle');
@@ -2165,8 +2626,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const snapToRuler = snapToRulerToggle.checked;
             const transparencyDisabled = transparencyToggle.checked;
             const animationsDisabled = animationsToggle.checked;
+            const canvasMode = canvasModeSelect.getValue();
+            const pageFormat = pageFormatSelect.getValue();
+            const pageOrientation = pageOrientationSelect.getValue();
+            const showPageGuides = showPageGuidesToggle ? showPageGuidesToggle.checked : true;
+            const askCanvasOnClear = askCanvasOnClearToggle ? askCanvasOnClearToggle.checked : true;
+            const autoFormulaInText = autoFormulaToggle ? autoFormulaToggle.checked : true;
 
-            document.body.classList.toggle('dark-theme', theme === 'dark');
+            const themeWillBeDark = theme === 'dark';
+            const themeChanged = document.body.classList.contains('dark-theme') !== themeWillBeDark;
+            document.body.classList.toggle('dark-theme', themeWillBeDark);
             document.body.classList.toggle('no-transparency', transparencyDisabled);
             document.body.classList.toggle('no-animations', animationsDisabled);
 
@@ -2178,14 +2647,36 @@ document.addEventListener('DOMContentLoaded', () => {
             localStorage.setItem('boardSnapToRuler', snapToRuler);
             localStorage.setItem('boardTransparencyDisabled', transparencyDisabled);
             localStorage.setItem('boardAnimationsDisabled', animationsDisabled);
+            localStorage.setItem('boardCanvasMode', canvasMode);
+            localStorage.setItem('boardPageFormat', pageFormat);
+            localStorage.setItem('boardPageOrientation', pageOrientation);
+            localStorage.setItem('boardShowPageGuides', showPageGuides);
+            localStorage.setItem('boardShowCanvasOnClear', askCanvasOnClear);
+            localStorage.setItem('boardAutoFormatFormulas', autoFormulaInText);
+            if (textTool.setAutoFormatEnabled) textTool.setAutoFormatEnabled(autoFormulaInText);
 
             if (canvasState) {
+                const wasNotebook = canvasState.canvasMode === 'notebook';
                 canvasState.smoothingAmount = parseInt(smoothing, 10);
                 canvasState.snappingMode = snappingMode;
                 canvasState.proportionalScale = proportionalScale;
                 canvasState.snapToRuler = snapToRuler;
+                canvasState.canvasMode = canvasMode;
+                canvasState.pageFormat = pageFormat;
+                canvasState.pageOrientation = pageOrientation;
+                canvasState.showPageGuides = showPageGuides;
+                if (!wasNotebook && canvasMode === 'notebook') {
+                    canvasState._notebookReflowed = false;
+                    reflowToNotebook();
+                } else if (canvasMode === 'infinite') {
+                    canvasState._notebookReflowed = false;
+                }
+                if (canvasState.saveViewState) canvasState.saveViewState();
+                // Тема влияет на фон карточек графиков — сбрасываем кэш тайлов.
+                if (themeChanged && canvasState.tileManager) canvasState.tileManager.clear();
             }
             redraw();
+            if (canvasState && canvasState.canvasMode === 'notebook') ensureNotebookPageVisible();
         }
 
         function loadSettings() {
@@ -2214,6 +2705,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const savedSnapToRuler = localStorage.getItem('boardSnapToRuler') !== 'false'; // Default true
             const savedTransparency = localStorage.getItem('boardTransparencyDisabled') === 'true';
             const savedAnimations = localStorage.getItem('boardAnimationsDisabled') === 'true';
+            const savedCanvasMode = (canvasState && canvasState.canvasMode) || localStorage.getItem('boardCanvasMode') || 'infinite';
+            const savedPageFormat = (canvasState && canvasState.pageFormat) || localStorage.getItem('boardPageFormat') || 'A4';
+            const savedPageOrientation = (canvasState && canvasState.pageOrientation) || localStorage.getItem('boardPageOrientation') || 'portrait';
+            const savedShowPageGuides = (canvasState ? canvasState.showPageGuides !== false : true) && localStorage.getItem('boardShowPageGuides') !== 'false';
+            const savedAskCanvasOnClear = localStorage.getItem('boardShowCanvasOnClear') !== 'false';
 
             selectedTheme = savedTheme;
             if (savedTheme === 'dark') {
@@ -2226,11 +2722,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
             bgDropdown.setValue(savedStyle);
             snapDropdown.setValue(savedSnapping);
+            canvasModeSelect.setValue(savedCanvasMode);
+            pageFormatSelect.setValue(savedPageFormat);
+            pageOrientationSelect.setValue(savedPageOrientation);
+            if (showPageGuidesToggle) showPageGuidesToggle.checked = savedShowPageGuides;
+            if (askCanvasOnClearToggle) askCanvasOnClearToggle.checked = savedAskCanvasOnClear;
 
             smoothingSlider.value = savedSmoothing;
             smoothingValue.textContent = savedSmoothing;
             proportionalScaleToggle.checked = savedProportional;
             if (snapToRulerToggle) snapToRulerToggle.checked = savedSnapToRuler;
+            const savedAutoFormula = localStorage.getItem('boardAutoFormatFormulas') !== 'false';
+            if (autoFormulaToggle) autoFormulaToggle.checked = savedAutoFormula;
+            if (textTool.setAutoFormatEnabled) textTool.setAutoFormatEnabled(savedAutoFormula);
             transparencyToggle.checked = savedTransparency;
             animationsToggle.checked = savedAnimations;
 
@@ -2243,6 +2747,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 canvasState.snappingMode = savedSnapping;
                 canvasState.proportionalScale = savedProportional;
                 canvasState.snapToRuler = savedSnapToRuler;
+                canvasState.canvasMode = savedCanvasMode;
+                canvasState.pageFormat = savedPageFormat;
+                canvasState.pageOrientation = savedPageOrientation;
+                canvasState.showPageGuides = savedShowPageGuides;
             }
             redraw();
         }

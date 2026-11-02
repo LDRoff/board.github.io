@@ -1,4 +1,4 @@
-import { TileManager } from './tileManager.js?v=1.2.6';
+import { TileManager } from './tileManager.js?v=1.4.19';
 
 export function createInitialState() {
     return {
@@ -66,6 +66,10 @@ export function createInitialState() {
         smartBrushEnabled: false,
         rulers: [],
         snapToRuler: true,
+        canvasMode: 'infinite',
+        pageFormat: 'A4',
+        pageOrientation: 'portrait',
+        showPageGuides: true,
         activePointers: new Set(),
 
         // --- ИЗМЕНЕНИЯ: Кэширование для оптимизации ---

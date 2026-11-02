@@ -1,8 +1,10 @@
 // --- START OF FILE js/hitTest.js ---
 
-import * as geo from './geometry.js?v=1.2.6';
-import { getLayersInProximity } from './utils.js?v=1.2.6';
-import { getActiveRulerForSettings } from './ui.js?v=1.2.6';
+import * as geo from './geometry.js?v=1.4.19';
+import { getLayersInProximity } from './utils.js?v=1.4.19';
+import { getActiveRulerForSettings } from './ui.js?v=1.4.19';
+import * as rulerTools from './rulerTools.js?v=1.4.19';
+import * as plotLayer from './plotLayer.js?v=1.4.19';
 
 // ... (getLayerAtPosition, getSelectionRotation, getHandleAtPosition без изменений) ...
 
@@ -89,7 +91,7 @@ export function getLayerAtPosition(pos, layers, zoom, spatialGrid, eraserRadius 
         else if (layer.type === 'curve') {
             hit = geo.isPointOnCurve(rotatedPos, layer, zoom, eraserRadius);
         }
-        else if (['text', 'image', 'pdf'].includes(layer.type)) {
+        else if (['text', 'image', 'pdf', 'formula', 'plot'].includes(layer.type)) {
             // Text, images, and PDFs should be selectable by clicking anywhere inside their bounds
             hit = geo.isPointInRect(rotatedPos, box, eraserRadius, false);
         }
@@ -304,7 +306,9 @@ export function getHandleAtPosition(pos, layers, zoom, groupRotation) {
         pivotY = centerY + layer.pivot.y;
     }
 
-    if (isSingleSelection && layer) {
+    // У формул и графиков нет настраиваемого пивота: центр — это перемещение.
+    const noPivot = isSingleSelection && layer && (layer.type === 'formula' || layer.type === 'plot');
+    if (isSingleSelection && layer && !noPivot) {
         if (pos.x >= pivotX - halfGeneralHandle && pos.x <= pivotX + halfGeneralHandle && pos.y >= pivotY - halfGeneralHandle && pos.y <= pivotY + halfGeneralHandle) {
             return 'pivot';
         }
@@ -353,6 +357,27 @@ export function layerInRect(layer, rect) {
 
     // Precise check: does the actual stroke/line intersect the selection rect?
     return geo.doesStrokeIntersectRect(layer, rect);
+}
+
+// Кнопки на карточке графика: «настройки» и «удалить».
+// Рисуются на overlay-слое, поэтому проверяются отдельно от обычных слоёв.
+export function getHitPlotButton(pos, selectedLayers, zoom) {
+    if (!Array.isArray(selectedLayers) || selectedLayers.length === 0) return null;
+    const sf = 1 / (zoom || 1);
+
+    for (let i = selectedLayers.length - 1; i >= 0; i--) {
+        const layer = selectedLayers[i];
+        if (!layer || layer.type !== 'plot') continue;
+
+        const rects = plotLayer.getPlotButtonRects(layer, sf);
+        for (const part of ['settings', 'delete']) {
+            const r = rects[part];
+            if (pos.x >= r.x && pos.x <= r.x + r.w && pos.y >= r.y && pos.y <= r.y + r.h) {
+                return { layer, part };
+            }
+        }
+    }
+    return null;
 }
 
 export function getHitRulerPart(pos, rulers, zoom) {
@@ -432,6 +457,40 @@ export function getHitRulerPart(pos, rulers, zoom) {
                 if (inHollowArch || inHollowBase) {
                     continue;
                 }
+                return { ruler, part: 'body' };
+            }
+            continue;
+        }
+
+        if (rulerTools.isTriangleRuler(ruler)) {
+            const geom = rulerTools.getTriangleGeometry(ruler);
+
+            if (scaleFactor <= 3) {
+                const handles = rulerTools.getTriangleHandles(ruler, scaleFactor);
+                const handleRadius = 12 * scaleFactor;
+                const isActive = getActiveRulerForSettings() === ruler;
+
+                if (!isActive) {
+                    if (Math.hypot(localX - handles.delete.x, localY - handles.delete.y) <= handleRadius) {
+                        return { ruler, part: 'delete' };
+                    }
+                    if (Math.hypot(localX - handles.settings.x, localY - handles.settings.y) <= handleRadius) {
+                        return { ruler, part: 'settings' };
+                    }
+                }
+
+                if (Math.hypot(localX - handles.resize.x, localY - handles.resize.y) <= handleRadius) {
+                    return { ruler, part: 'resize' };
+                }
+                if (Math.hypot(localX - handles.rotateP.x, localY - handles.rotateP.y) <= handleRadius) {
+                    return { ruler, part: 'rotate' };
+                }
+                if (Math.hypot(localX - handles.rotateQ.x, localY - handles.rotateQ.y) <= handleRadius) {
+                    return { ruler, part: 'rotate' };
+                }
+            }
+
+            if (rulerTools.isPointInTriangle(localX, localY, geom)) {
                 return { ruler, part: 'body' };
             }
             continue;

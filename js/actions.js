@@ -1,8 +1,8 @@
 // --- START OF FILE js/actions.js ---
 
-import { getBoundingBox, getGroupBoundingBox, rotatePoint } from './geometry.js?v=1.2.6';
-import * as hitTest from './hitTest.js?v=1.2.6';
-import { snapToGrid, getLayersInProximity, createTextImage } from './utils.js?v=1.2.6';
+import { getBoundingBox, getGroupBoundingBox, rotatePoint } from './geometry.js?v=1.4.19';
+import * as hitTest from './hitTest.js?v=1.4.19';
+import { snapToGrid, getLayersInProximity, createTextImage } from './utils.js?v=1.4.19';
 
 export function handleMove(state, pos, event) {
     let dx = pos.x - state.dragStartPos.x;
@@ -86,7 +86,7 @@ export function handleMove(state, pos, event) {
     state.transformGroup.forEach((layer, index) => {
         const originalLayer = state.originalTransformGroup[index];
 
-        if (['rect', 'image', 'text', 'pdf', 'sticker'].includes(layer.type)) {
+        if (['rect', 'image', 'text', 'pdf', 'sticker', 'formula', 'plot'].includes(layer.type)) {
             layer.x = originalLayer.x + dx;
             layer.y = originalLayer.y + dy;
             if (layer.type === 'sticker' && window.stickerApp && window.stickerApp.stickers) {
@@ -238,7 +238,7 @@ export function handleScale(state, pos, event) {
         case 'right': newRight = localPos.x; break;
     }
 
-    const hasImageOrPdf = state.selectedLayers.some(l => l.type === 'image' || l.type === 'pdf');
+    const hasImageOrPdf = state.selectedLayers.some(l => l.type === 'image' || l.type === 'pdf' || l.type === 'formula' || l.type === 'plot');
     const proportionalSetting = state.proportionalScale !== false; // true по умолчанию
     const isProportionalDefault = hasImageOrPdf && proportionalSetting;
     
@@ -348,7 +348,7 @@ export function handleScale(state, pos, event) {
             return;
         }
 
-        if (['rect', 'image', 'pdf', 'sticker'].includes(layer.type)) {
+        if (['rect', 'image', 'pdf', 'sticker', 'formula', 'plot'].includes(layer.type)) {
             Object.assign(layer, { x: newLayerProps.x, y: newLayerProps.y, width: newLayerProps.width, height: newLayerProps.height });
             if (layer.type === 'sticker' && window.stickerApp && window.stickerApp.stickers) {
                 const s = window.stickerApp.stickers.find(st => st.id === layer.id);
@@ -480,7 +480,7 @@ export function handleMovePivot(state, pos) {
 
     const applyOffset = (p, d) => ({ x: p.x + d.x, y: p.y + d.y });
 
-    if (['rect', 'image', 'text', 'pdf', 'parallelogram', 'parallelepiped'].includes(layer.type)) {
+    if (['rect', 'image', 'text', 'pdf', 'parallelogram', 'parallelepiped', 'formula', 'plot'].includes(layer.type)) {
         layer.x = originalLayer.x + dx;
         layer.y = originalLayer.y + dy;
     } else if (['triangle', 'trapezoid', 'rhombus'].includes(layer.type)) {

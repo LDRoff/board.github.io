@@ -1,9 +1,12 @@
 // --- START OF FILE js/toolbar.js ---
 
-import { pasteFromClipboard } from './events.js?v=1.2.6';
-import * as utils from './utils.js?v=1.2.6';
-import * as geo from './geometry.js?v=1.2.6';
-import { updateCursor, getHandCursor } from './ui.js?v=1.2.6';
+import { pasteFromClipboard } from './events.js?v=1.4.19';
+import * as utils from './utils.js?v=1.4.19';
+import * as geo from './geometry.js?v=1.4.19';
+import { updateCursor, getHandCursor } from './ui.js?v=1.4.19';
+import * as rulerTools from './rulerTools.js?v=1.4.19';
+import { openNewFormulaDialog } from './formulaLayer.js?v=1.4.19';
+import { openPlotEditor } from './plotLayer.js?v=1.4.19';
 
 export function initializeToolbar(canvasState, redrawCallback, updateToolbarCallback, handlers) {
     const toolbarWrapper = document.getElementById('toolbarWrapper');
@@ -29,6 +32,8 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
 
     const addRulerBtn = document.getElementById('addRulerBtn');
     const addProtractorBtn = document.getElementById('addProtractorBtn');
+    const addTriangle45Btn = document.getElementById('addTriangle45Btn');
+    const addTriangle30Btn = document.getElementById('addTriangle30Btn');
 
     const zoomControls = document.getElementById('zoomControls');
 
@@ -239,6 +244,79 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
             if (addFileToolContainer) {
                 addFileToolContainer.classList.remove('active');
             }
+        });
+    }
+
+    // Угольники с фиксированными углами: тот же путь, что у линейки и транспортира.
+    const addTriangleTool = (btn, type) => {
+        if (!btn) return;
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            cancelInProgressActions();
+
+            // Ставим в центр видимой области.
+            const dpr = window.devicePixelRatio || 1;
+            const viewW = (canvasState.canvas.width / dpr) / canvasState.zoom;
+            const viewH = (canvasState.canvas.height / dpr) / canvasState.zoom;
+            const x = ((canvasState.canvas.width / dpr) / 2 - canvasState.panX) / canvasState.zoom;
+            const y = ((canvasState.canvas.height / dpr) / 2 - canvasState.panY) / canvasState.zoom;
+
+            // На телефоне инструмент не должен оказаться больше экрана.
+            const size = rulerTools.pickDefaultSize(Math.min(viewW, viewH) * 0.62);
+
+            canvasState.rulers.push(rulerTools.createTriangleRuler(type, x, y, size));
+
+            if (canvasState.saveViewState) canvasState.saveViewState();
+
+            redrawCallback();
+
+            if (addFileToolContainer) {
+                addFileToolContainer.classList.remove('active');
+            }
+        });
+    };
+    addTriangleTool(addTriangle45Btn, rulerTools.TRIANGLE45);
+    addTriangleTool(addTriangle30Btn, rulerTools.TRIANGLE30);
+
+    // Формула: окно ввода, затем объект на доске.
+    const addFormulaBtn = document.getElementById('addFormulaMenuBtn');
+    if (addFormulaBtn) {
+        addFormulaBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            cancelInProgressActions();
+
+            const dpr = window.devicePixelRatio || 1;
+            const x = ((canvasState.canvas.width / dpr) / 2 - canvasState.panX) / canvasState.zoom;
+            const y = ((canvasState.canvas.height / dpr) / 2 - canvasState.panY) / canvasState.zoom;
+
+            openNewFormulaDialog(canvasState, { x, y });
+        });
+    }
+
+    // График: окно с живым превью.
+    const addPlotBtn = document.getElementById('addPlotMenuBtn');
+    if (addPlotBtn) {
+        addPlotBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            cancelInProgressActions();
+
+            const dpr = window.devicePixelRatio || 1;
+            const x = ((canvasState.canvas.width / dpr) / 2 - canvasState.panX) / canvasState.zoom;
+            const y = ((canvasState.canvas.height / dpr) / 2 - canvasState.panY) / canvasState.zoom;
+
+            openPlotEditor(canvasState, null, { x, y });
+        });
+    }
+
+    // Подменю «Линейки и угольники» внутри меню скрепки.
+    const rulersMenuBtn = document.getElementById('addRulersMenuBtn');
+    const rulersSubmenu = document.getElementById('rulersSubmenu');
+    if (rulersMenuBtn && rulersSubmenu) {
+        rulersMenuBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const open = rulersSubmenu.classList.toggle('open');
+            rulersMenuBtn.classList.toggle('open', open);
         });
     }
 
@@ -829,8 +907,36 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
 
     logo.addEventListener('click', (e) => {
         e.stopPropagation();
+        settingsMenu.classList.remove('export-open');
+        const menu = document.getElementById('exportMenu');
+        if (menu) menu.classList.remove('open');
         settingsMenu.classList.toggle('visible');
     });
+
+    const exportMenu = document.getElementById('exportMenu');
+    const hideExportMenu = () => {
+        if (!exportMenu) return;
+        exportMenu.classList.remove('open');
+        settingsMenu.classList.remove('export-open');
+    };
+    if (exportMenu) {
+        exportMenu.addEventListener('click', (e) => {
+            if (e.target.closest('.export-submenu')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const open = !exportMenu.classList.contains('open');
+            exportMenu.classList.toggle('open', open);
+            settingsMenu.classList.toggle('export-open', open);
+        });
+        exportMenu.querySelectorAll('.export-submenu a').forEach(link => {
+            link.addEventListener('click', () => {
+                setTimeout(() => {
+                    hideExportMenu();
+                    settingsMenu.classList.remove('visible');
+                }, 0);
+            });
+        });
+    }
 
     const findDrawingsBtn = document.getElementById('findDrawingsBtn');
     if (findDrawingsBtn) {
@@ -858,7 +964,8 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
 
     // --- НАЧАЛО ИЗМЕНЕНИЙ ---
     confirmClearBtn.addEventListener('click', () => {
-        if (canvasState.layers.length === 0 && (!window.stickerApp || window.stickerApp.stickers.length === 0)) {
+        const hasRulers = Array.isArray(canvasState.rulers) && canvasState.rulers.length > 0;
+        if (canvasState.layers.length === 0 && !hasRulers && (!window.stickerApp || window.stickerApp.stickers.length === 0)) {
             hideConfirmModal();
             return;
         }
@@ -870,6 +977,9 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
         // снимок "после" в истории берётся из canvasState.layers в момент вызова.
         canvasState.layers = [];
         canvasState.selectedLayers = [];
+        // Линейки, транспортир и угольники — тоже объекты доски.
+        canvasState.rulers = [];
+        if (canvasState.saveViewState) canvasState.saveViewState();
 
         // Создаем корректный объект изменения для системы истории
         const change = {
@@ -902,9 +1012,14 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
         if (canvasState.layerBBoxCache) {
             canvasState.layerBBoxCache.clear();
         }
+        canvasState._notebookReflowed = false;
 
         redrawCallback();
         hideConfirmModal();
+
+        if (localStorage.getItem('boardShowCanvasOnClear') !== 'false' && typeof canvasState.showCanvasOnboarding === 'function') {
+            setTimeout(() => canvasState.showCanvasOnboarding({ fromClear: true }), 80);
+        }
     });
     // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
@@ -918,6 +1033,7 @@ export function initializeToolbar(canvasState, redrawCallback, updateToolbarCall
     document.addEventListener('click', (e) => {
         if (!settingsMenu.contains(e.target) && e.target !== logo) {
             settingsMenu.classList.remove('visible');
+            hideExportMenu();
         }
 
         const clickedInsideSubtool = allSubtoolContainers.some(c => c.contains(e.target));

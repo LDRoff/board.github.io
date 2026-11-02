@@ -1,6 +1,6 @@
 // --- START OF FILE js/tileManager.js ---
 
-import { getTransformedBoundingBox, doBoxesIntersect } from './geometry.js?v=1.2.6';
+import { getTransformedBoundingBox, doBoxesIntersect } from './geometry.js?v=1.4.19';
 
 // Размер одной плитки в ЛОГИЧЕСКИХ пикселях
 const TILE_SIZE = 1024;

@@ -1,4 +1,7 @@
-import { cloneLayersForAction, createTextImage } from './utils.js?v=1.2.6';
+import { cloneLayersForAction, createTextImage } from './utils.js?v=1.4.19';
+import { mathFromAttr, isMathEmpty, parsePlainMath, normalizeRow, readMathFromDom, mathToAttr, plainTextOf, formulaToHtml } from './mathModel.js?v=1.4.19';
+import { formulaInlineHtml } from './formulaLayer.js?v=1.4.19';
+import { openMathEditor } from './mathEditor.js?v=1.4.19';
 
 let editorDiv = null;
 let currentEditingLayer = null;
@@ -12,6 +15,22 @@ let onOutsidePressHandler = null;
 let savedSelectionRange = null;
 let _isEditing = false;
 let editStartTime = 0;
+
+// Автоформат в тексте можно выключить в настройках.
+let autoFormatEnabled = true;
+try {
+    const stored = localStorage.getItem('boardAutoFormatFormulas');
+    if (stored !== null) autoFormatEnabled = stored !== 'false';
+} catch (e) { /* приватный режим */ }
+
+export function setAutoFormatEnabled(enabled) {
+    autoFormatEnabled = enabled !== false;
+    try { localStorage.setItem('boardAutoFormatFormulas', autoFormatEnabled); } catch (e) { /* ignore */ }
+}
+
+export function isAutoFormatEnabled() {
+    return autoFormatEnabled;
+}
 
 export function getEditorTextarea() {
     return editorDiv;
@@ -249,6 +268,8 @@ function collectTextSegments(root, range) {
     while ((node = walker.nextNode())) {
         const text = node.nodeValue;
         if (!text) continue;
+        // Внутрь формул не лезем: там своя вёрстка и свои размеры.
+        if (node.parentElement && node.parentElement.closest && node.parentElement.closest('[data-math]')) continue;
 
         let intersects = true;
         try { intersects = range.intersectsNode(node); } catch (e) { intersects = false; }
@@ -368,7 +389,14 @@ export function transformHTMLCase(html) {
     // If the text is all uppercase, change to lowercase. Otherwise to uppercase.
     const isUpper = (text === text.toUpperCase());
     
-    const walk = document.createTreeWalker(tempDiv, NodeFilter.SHOW_TEXT, null, false);
+    const walk = document.createTreeWalker(tempDiv, NodeFilter.SHOW_TEXT, {
+        acceptNode(n) {
+            if (n.parentElement && n.parentElement.closest && n.parentElement.closest('[data-math]')) {
+                return NodeFilter.FILTER_REJECT;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+        }
+    }, false);
     let node;
     while(node = walk.nextNode()) {
         if (isUpper) {
@@ -458,6 +486,36 @@ function initializeTextEditor() {
     editorDiv.addEventListener('dblclick', stopPropagation);
     editorDiv.addEventListener('contextmenu', stopPropagation);
 
+    // Клик вплотную к формуле ставит курсор рядом с ней, а не внутрь:
+    // иначе каретка «залипает» в показателе степени.
+    editorDiv.addEventListener('mousedown', (e) => {
+        const mathEl = e.target && e.target.closest ? e.target.closest('[data-math]') : null;
+        if (mathEl && editorDiv.contains(mathEl)) {
+            const rect = mathEl.getBoundingClientRect();
+            const nearLeft = e.clientX <= rect.left + 6;
+            const nearRight = e.clientX >= rect.right - 6;
+            if (nearLeft || nearRight) {
+                e.preventDefault();
+                placeCaretBesideMath(mathEl, nearLeft);
+                return;
+            }
+        }
+
+        const near = findMathNearPoint(e.clientX, e.clientY, 8);
+        if (!near) return;
+        e.preventDefault();
+        placeCaretBesideMath(near.el, near.side === 'left');
+    });
+
+    // Двойной клик по формуле внутри текста — правка формулы.
+    editorDiv.addEventListener('dblclick', (e) => {
+        const mathEl = e.target && e.target.closest ? e.target.closest('[data-math]') : null;
+        if (!mathEl) return;
+        e.preventDefault();
+        e.stopPropagation();
+        openInlineFormulaEditor(mathEl);
+    });
+
     editorDiv.addEventListener('wheel', (e) => {
         if (canvasStateRef && canvasStateRef.performZoom && canvasStateRef.canvas) {
             e.preventDefault();
@@ -473,7 +531,234 @@ function initializeTextEditor() {
         }
     });
 
-    editorDiv.addEventListener('input', updateEditorSizeAndLayer);
+    editorDiv.addEventListener('input', () => {
+        updateEditorSizeAndLayer();
+        scheduleTextAutoFormat();
+    });
+
+    // Вставка из буфера: содержимое должно подстроиться под этот блок —
+    // цвет, фон, шрифт и кегль берём от окружающего текста.
+    editorDiv.addEventListener('paste', () => {
+        const known = new Set(Array.from(editorDiv.querySelectorAll('*')));
+        setTimeout(() => {
+            const fresh = Array.from(editorDiv.querySelectorAll('*')).filter((el) => !known.has(el));
+            fresh.forEach((el) => {
+                if (el.style) {
+                    el.style.fontSize = '';
+                    el.style.fontFamily = '';
+                    el.style.color = '';
+                    el.style.backgroundColor = '';
+                    el.style.background = '';
+                    el.style.fontWeight = '';
+                    el.style.fontStyle = '';
+                    el.style.textDecoration = '';
+                    el.style.textShadow = '';
+                }
+                if (el.tagName === 'FONT') {
+                    ['size', 'face', 'color'].forEach((attr) => {
+                        if (el.getAttribute(attr)) el.removeAttribute(attr);
+                    });
+                }
+                if (el.hasAttribute && el.hasAttribute('bgcolor')) el.removeAttribute('bgcolor');
+            });
+
+            editorDiv.querySelectorAll('[data-math]').forEach((span) => {
+                if (known.has(span)) return;
+                span.setAttribute('contenteditable', 'false');
+                span.querySelectorAll('[data-row]').forEach((row) => row.removeAttribute('contenteditable'));
+                const root = span.querySelector('[data-math-root]');
+                if (root) {
+                    root.style.fontSize = '1em';
+                    root.style.fontFamily = '';
+                    root.style.color = 'currentColor';
+                }
+            });
+
+            updateEditorSizeAndLayer();
+            scheduleTextAutoFormat();
+        }, 0);
+    });
+
+    // Поставил пробел после «2x-5» — сразу превращаем в формулу (как в Excel).
+    editorDiv.addEventListener('keyup', (e) => {
+        if (e.key === ' ' || e.key === 'Enter' || e.key === ')') {
+            applyTextAutoFormat();
+        }
+    });
+}
+
+// ------------------------------------------------- автоформат формул в тексте
+// Пользователь печатает «2x-5» или «1/2» — после паузы это становится
+// настоящей формулой прямо в тексте.
+
+let textAutoFormatTimer = null;
+
+function looksLikeTextMath(token) {
+    if (!token) return false;
+    if (/[А-Яа-яЁё]/.test(token)) return false;          // слова не трогаем
+    const hasDigit = /\d/.test(token);
+    const hasLetter = /[A-Za-zπ]/.test(token);
+    const hasMathSign = /[\^_\/√|]/.test(token);
+    if (hasDigit && hasMathSign) return true;
+    if (hasDigit && hasLetter) return true;
+    if (/\d+\s*\/\s*\d+/.test(token)) return true;
+    if (/(sin|cos|tg|ctg|ln|lg|log|sqrt)\s*\(/i.test(token)) return true;
+    return false;
+}
+
+function scheduleTextAutoFormat() {
+    if (!autoFormatEnabled) return;
+    if (textAutoFormatTimer) clearTimeout(textAutoFormatTimer);
+    textAutoFormatTimer = setTimeout(() => {
+        textAutoFormatTimer = null;
+        if (!autoFormatEnabled) return;
+        applyTextAutoFormat();
+        // Плюс превращаем в формулы всё, что уже набрано, но не у курсора.
+        convertAllTextMathTokens({ skipCaret: true });
+    }, 800);
+}
+
+function applyTextAutoFormat() {
+    if (!autoFormatEnabled) return false;
+    if (!_isEditing || !editorDiv) return false;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return false;
+
+    const range = selection.getRangeAt(0);
+    if (!range.collapsed) return false;
+
+    const node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE || !editorDiv.contains(node)) return false;
+    // Внутри формулы работает свой автоформат.
+    if (node.parentElement && node.parentElement.closest && node.parentElement.closest('[data-math]')) return false;
+
+    const caret = range.startOffset;
+    const before = node.nodeValue.slice(0, caret);
+    // Токен перед курсором; после него может быть пробел (только что набрали).
+    const tail = before.match(/([0-9A-Za-zπ()+\-−×÷*\/^_.,|√]+)(\s*)$/);
+    if (!tail) return false;
+
+    const token = tail[1];
+    const trailingLen = tail[2] ? tail[2].length : 0;
+    if (token.length < 2 || !looksLikeTextMath(token)) return false;
+    if (/[+\-−×÷*\/^_]$/.test(token)) return false;
+
+    const parsed = parsePlainMath(token);
+    if (!parsed || !parsed.items.length) return false;
+
+    const hasStruct = parsed.items.some((it) => it.t !== 'txt');
+    const plainText = parsed.items.filter((it) => it.t === 'txt').map((it) => it.v).join('');
+    if (!hasStruct && plainText === token) return false;
+
+    const endOffset = caret - trailingLen;
+    const startOffset = endOffset - token.length;
+    if (startOffset < 0 || endOffset <= startOffset) return false;
+
+    const tokenRange = document.createRange();
+    tokenRange.setStart(node, startOffset);
+    tokenRange.setEnd(node, endOffset);
+
+    const holder = document.createElement('div');
+    holder.innerHTML = formulaInlineHtml(parsed);
+    const formulaNode = holder.firstElementChild;
+    if (!formulaNode) return false;
+
+    applyLocalFormulaSize(formulaNode, tokenRange, currentEditingLayer);
+
+    tokenRange.deleteContents();
+    tokenRange.insertNode(formulaNode);
+
+    // Ставим курсор на то же место, где он был (после пробелов).
+    const remainder = formulaNode.nextSibling;
+    const after = document.createRange();
+    if (remainder && remainder.nodeType === Node.TEXT_NODE) {
+        after.setStart(remainder, Math.min(trailingLen, remainder.nodeValue.length));
+    } else {
+        after.setStartAfter(formulaNode);
+    }
+    after.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(after);
+    savedSelectionRange = after.cloneRange();
+
+    updateEditorSizeAndLayer();
+    return true;
+}
+
+// Проходим по всему тексту и превращаем в формулы все математические токены.
+// Нужно, когда человек печатает быстро и уходит из редактора.
+function convertAllTextMathTokens({ skipCaret = false } = {}) {
+    if (!autoFormatEnabled) return 0;
+    if (!_isEditing || !editorDiv) return 0;
+
+    let caretNode = null;
+    let caretOffset = -1;
+    if (skipCaret) {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount && sel.getRangeAt(0).startContainer.nodeType === Node.TEXT_NODE) {
+            caretNode = sel.getRangeAt(0).startContainer;
+            caretOffset = sel.getRangeAt(0).startOffset;
+        }
+    }
+
+    const walker = document.createTreeWalker(editorDiv, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+            if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+            if (node.parentElement && node.parentElement.closest && node.parentElement.closest('[data-math]')) {
+                return NodeFilter.FILTER_REJECT;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+        },
+    });
+
+    const nodes = [];
+    let cur;
+    while ((cur = walker.nextNode())) nodes.push(cur);
+
+    let converted = 0;
+    for (const textNode of nodes) {
+        const text = textNode.nodeValue;
+        const re = /[0-9A-Za-zπ()+\-−×÷*\/^_.,|√]+/g;
+        const found = [];
+        let m;
+        while ((m = re.exec(text))) {
+            const token = m[0];
+            if (token.length < 2 || !looksLikeTextMath(token)) continue;
+            if (/[+\-−×÷*\/^_]$/.test(token)) continue;
+            if (skipCaret && textNode === caretNode) {
+                const start = m.index;
+                const end = start + token.length;
+                if (caretOffset >= start && caretOffset <= end) continue;
+            }
+            const parsed = parsePlainMath(token);
+            if (!parsed || !parsed.items.length) continue;
+            const hasStruct = parsed.items.some((it) => it.t !== 'txt');
+            const plainText = parsed.items.filter((it) => it.t === 'txt').map((it) => it.v).join('');
+            if (!hasStruct && plainText === token) continue;
+            found.push({ start: m.index, end: m.index + token.length, parsed });
+        }
+
+        for (let k = found.length - 1; k >= 0; k--) {
+            if (!textNode.isConnected) break;
+            const { start, end, parsed } = found[k];
+            if (end > textNode.nodeValue.length) continue;
+            const r = document.createRange();
+            r.setStart(textNode, start);
+            r.setEnd(textNode, end);
+
+            const holder = document.createElement('div');
+            holder.innerHTML = formulaInlineHtml(parsed);
+            const el = holder.firstElementChild;
+            if (!el) continue;
+            applyLocalFormulaSize(el, r, currentEditingLayer);
+            r.deleteContents();
+            r.insertNode(el);
+            converted++;
+        }
+    }
+
+    if (converted) updateEditorSizeAndLayer();
+    return converted;
 }
 
 export function updateEditorStyle(layer) {
@@ -572,6 +857,7 @@ export function startEditing(canvasState, layer, onFinish) {
             const subToolbar = document.getElementById('drawingSubToolbar');
             const fontSheet = document.getElementById('mobile-font-sheet');
             const fontBackdrop = document.getElementById('mobile-font-backdrop');
+            const mathModal = document.getElementById('math-modal');
 
             if (editorDiv && editorDiv.contains(e.target)) return;
             if (toolbar && toolbar.contains(e.target)) return;
@@ -579,6 +865,7 @@ export function startEditing(canvasState, layer, onFinish) {
             if (subToolbar && subToolbar.contains(e.target)) return;
             if (fontSheet && fontSheet.contains(e.target)) return;
             if (fontBackdrop && fontBackdrop.contains(e.target)) return;
+            if (mathModal && mathModal.contains(e.target)) return;
 
             // Consume the event so the canvas doesn't start a selectionBox
             // or any other drawing action, then finish editing.
@@ -636,15 +923,22 @@ export function startEditing(canvasState, layer, onFinish) {
 function extractStylesFromHTML(html) {
     const div = document.createElement('div');
     div.innerHTML = html;
-    const spans = div.querySelectorAll('span[style]');
+    const spans = Array.from(div.querySelectorAll('span[style]'))
+        .filter((span) => !span.hasAttribute('data-math'));
     if (spans.length === 1 && div.innerText.trim() === spans[0].innerText.trim()) {
-        if (spans[0].style.color) return { color: spans[0].style.color };
+        const color = spans[0].style.color;
+        if (color && color !== 'currentColor') return { color };
     }
     return {};
 }
 
 export async function finishEditing() {
     if (!currentEditingLayer || !_isEditing) return;
+    // Дожимаем автоформат, чтобы «2x-5», набранное перед уходом, стало формулой.
+    try {
+        applyTextAutoFormat();
+        convertAllTextMathTokens();
+    } catch (e) { /* не критично */ }
     _isEditing = false;
     if (canvasStateRef) {
         canvasStateRef.isEditingText = false;
@@ -672,7 +966,7 @@ export async function finishEditing() {
     tempDiv.innerHTML = currentEditingLayer.content;
     const textContent = tempDiv.innerText.replace(/\u200B/g, '').trim();
 
-    if (textContent === '' && !tempDiv.querySelector('img')) {
+    if (textContent === '' && !tempDiv.querySelector('img') && !tempDiv.querySelector('[data-math]')) {
         const index = canvasStateRef.layers.findIndex(l => String(l.id) === String(currentEditingLayer.id));
         if (index > -1) {
             canvasStateRef.layers.splice(index, 1);
@@ -704,4 +998,195 @@ export async function finishEditing() {
     canvasStateRef = null;
     onFinishCallback = null;
     savedSelectionRange = null;
+}
+
+// ------------------------------------------------ формулы внутри текста
+
+// Вставка формулы в каретку редактора.
+export function insertFormulaIntoEditor(math) {
+    if (!editorDiv || !_isEditing) return false;
+
+    const holder = document.createElement('div');
+    holder.innerHTML = formulaInlineHtml(math);
+    const node = holder.firstElementChild;
+    if (!node) return false;
+
+    restoreSelectionAndFocus();
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return false;
+
+    let range = selection.getRangeAt(0);
+    if (!editorDiv.contains(range.commonAncestorContainer)) {
+        range = document.createRange();
+        range.selectNodeContents(editorDiv);
+        range.collapse(false);
+    }
+
+    // Если рядом текст с собственным кеглем (после форматирования), формула
+    // должна быть ровно того же размера, что и он.
+    applyLocalFormulaSize(node, range, currentEditingLayer);
+
+    range.deleteContents();
+    range.insertNode(node);
+
+    // Каретка сразу после формулы, чтобы можно было продолжать печатать.
+    const spacer = document.createTextNode('\u00a0');
+    if (node.after) node.after(spacer);
+
+    const newRange = document.createRange();
+    newRange.setStartAfter(spacer);
+    newRange.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(newRange);
+    savedSelectionRange = newRange.cloneRange();
+
+    updateEditorSizeAndLayer();
+    return true;
+}
+
+// Ближайшая к точке клика формула в редакторе (в пределах pad пикселей).
+function findMathNearPoint(x, y, pad = 8) {
+    if (!editorDiv) return null;
+    let best = null;
+    editorDiv.querySelectorAll('[data-math]').forEach((el) => {
+        const r = el.getBoundingClientRect();
+        if (y < r.top - pad || y > r.bottom + pad) return;
+        const dl = Math.abs(x - r.left);
+        const dr = Math.abs(x - r.right);
+        if (dl <= pad && (!best || dl < best.dist)) best = { el, side: 'left', dist: dl };
+        if (dr <= pad && (!best || dr < best.dist)) best = { el, side: 'right', dist: dr };
+    });
+    return best;
+}
+
+// Ставит курсор сразу перед формулой или сразу после неё (снаружи).
+function placeCaretBesideMath(mathEl, before) {
+    if (!mathEl || !editorDiv) return;
+    const selection = window.getSelection();
+    if (!selection) return;
+
+    let target = before ? mathEl.previousSibling : mathEl.nextSibling;
+    let offset = before ? null : 0;
+
+    if (target && target.nodeType === Node.TEXT_NODE) {
+        offset = before ? target.nodeValue.length : 0;
+    } else {
+        // Нет текстового соседа — вставляем невидимый разделитель.
+        const spacer = document.createTextNode('\u200b');
+        if (before) mathEl.before(spacer);
+        else mathEl.after(spacer);
+        target = spacer;
+        offset = before ? 1 : 0;
+    }
+
+    // Сначала фокус (он может сбросить выделение), потом ставим каретку.
+    if (editorDiv.focus) {
+        try { editorDiv.focus({ preventScroll: true }); } catch (e) { editorDiv.focus(); }
+    }
+
+    const range = document.createRange();
+    range.setStart(target, offset);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    savedSelectionRange = range.cloneRange();
+}
+
+// Кегль формулы подстраивается под соседний текст: если рядом текст
+// с собственным размером, формула становится ровно такой же.
+function applyLocalFormulaSize(node, range, layer) {
+    if (!node || !range) return;
+    const container = range.startContainer;
+    const el = container && container.nodeType === 1 ? container : (container ? container.parentElement : null);
+    if (!el) return;
+
+    let local = parseFloat(getComputedStyle(el).fontSize);
+    if (!Number.isFinite(local)) local = layer ? (layer.fontSize || 30) : 30;
+    const base = layer ? (layer.fontSize || 30) : local;
+
+    const root = node.querySelector ? node.querySelector('[data-math-root]') : null;
+    if (!root) return;
+    if (Math.abs(local - base) > 1) {
+        root.style.fontSize = `${Math.round(local * 100) / 100}px`;
+    }
+}
+
+// Вставка формулы в конец текстового слоя (слой выделен, но не редактируется).
+export function appendFormulaToTextLayer(layer, math) {
+    if (!layer || layer.type !== 'text') return false;
+    const div = document.createElement('div');
+    div.innerHTML = layer.content || '';
+    // Формулу ставим в последний абзац, а не отдельным блоком после него.
+    const last = div.lastElementChild;
+    const target = (last && /^(DIV|P|LI|SPAN)$/i.test(last.tagName)) ? last : div;
+    target.insertAdjacentHTML('beforeend', ' ' + formulaInlineHtml(math));
+    layer.content = div.innerHTML;
+    return true;
+}
+
+// Единая точка входа: если текст редактируется — в каретку, иначе — в выделенный слой.
+export function insertFormula(math, canvasState) {
+    if (_isEditing && editorDiv) return insertFormulaIntoEditor(math);
+
+    const layer = (canvasState && canvasState.selectedLayers && canvasState.selectedLayers.length === 1)
+        ? canvasState.selectedLayers[0]
+        : null;
+    if (!layer || layer.type !== 'text') return false;
+
+    const before = cloneLayersForAction([layer]);
+    if (!appendFormulaToTextLayer(layer, math)) return false;
+
+    if (canvasState.tileManager) canvasState.tileManager.invalidateLayer(layer, canvasState);
+    if (canvasState.saveState) {
+        const after = cloneLayersForAction([layer]);
+        canvasState.saveState({ type: 'update', before, after });
+    }
+
+    // Старую картинку не обнуляем: доска не мигает, пока рисуется новая.
+    createTextImage(layer).then((img) => {
+        if (!img) return;
+        layer.cachedImage = img;
+        if (canvasState.tileManager) canvasState.tileManager.invalidateLayer(layer, canvasState);
+        if (canvasState.redraw) canvasState.redraw();
+    });
+
+    return true;
+}
+
+// Правка формулы по двойному клику внутри текста.
+function openInlineFormulaEditor(mathEl) {
+    if (!mathEl || !editorDiv) return;
+    const math = mathFromAttr(mathEl.getAttribute('data-math'));
+    if (isMathEmpty(math)) return;
+    const stateAtOpen = canvasStateRef;
+
+    openMathEditor({
+        title: 'Формула в тексте',
+        math,
+        hint: 'Измените формулу или постройте по ней график.',
+        onSubmit: ({ math: nextMath, graph }) => {
+            const size = currentEditingLayer ? (currentEditingLayer.fontSize || 30) : 30;
+            const holder = document.createElement('div');
+            holder.innerHTML = formulaInlineHtml(nextMath);
+            const node = holder.firstElementChild;
+            if (node && mathEl.parentNode) {
+                mathEl.parentNode.replaceChild(node, mathEl);
+                const range = document.createRange();
+                range.setStartAfter(node);
+                range.collapse(true);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+                savedSelectionRange = range.cloneRange();
+            }
+            updateEditorSizeAndLayer();
+
+            if (graph && stateAtOpen) {
+                const target = mathEl.getBoundingClientRect();
+                import('./plotLayer.js?v=1.4.19').then((plot) => {
+                    plot.insertPlotNearScreenPoint(stateAtOpen, nextMath, target.left + 20, target.bottom + 20);
+                });
+            }
+        },
+    });
 }

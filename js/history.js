@@ -1,7 +1,7 @@
 // js/history.js
 
-import { saveStateToDB } from './persist.js?v=1.2.6';
-import { cloneLayersForAction } from './utils.js?v=1.2.6';
+import { saveStateToDB } from './persist.js?v=1.4.19';
+import { cloneLayersForAction } from './utils.js?v=1.4.19';
 
 let history = [];
 let historyIndex = -1;
@@ -38,6 +38,10 @@ function _scheduleDBUpdate() {
             panX: canvasStateRef ? canvasStateRef.panX : 0,
             panY: canvasStateRef ? canvasStateRef.panY : 0,
             zoom: canvasStateRef ? canvasStateRef.zoom : 1,
+            canvasMode: canvasStateRef ? (canvasStateRef.canvasMode || 'infinite') : 'infinite',
+            pageFormat: canvasStateRef ? (canvasStateRef.pageFormat || 'A4') : 'A4',
+            pageOrientation: canvasStateRef ? (canvasStateRef.pageOrientation || 'portrait') : 'portrait',
+            showPageGuides: canvasStateRef ? (canvasStateRef.showPageGuides !== false) : true,
             rulers: canvasStateRef ? (canvasStateRef.rulers || []) : [],
             stickerLinks: canvasStateRef && canvasStateRef.viewState ? (canvasStateRef.viewState.stickerLinks || []) : [],
           },
@@ -189,6 +193,10 @@ export function flushDBUpdate() {
           panX: canvasStateRef ? canvasStateRef.panX : 0,
           panY: canvasStateRef ? canvasStateRef.panY : 0,
           zoom: canvasStateRef ? canvasStateRef.zoom : 1,
+            canvasMode: canvasStateRef ? (canvasStateRef.canvasMode || 'infinite') : 'infinite',
+            pageFormat: canvasStateRef ? (canvasStateRef.pageFormat || 'A4') : 'A4',
+            pageOrientation: canvasStateRef ? (canvasStateRef.pageOrientation || 'portrait') : 'portrait',
+            showPageGuides: canvasStateRef ? (canvasStateRef.showPageGuides !== false) : true,
           rulers: canvasStateRef ? (canvasStateRef.rulers || []) : [],
           stickerLinks: canvasStateRef && canvasStateRef.viewState ? (canvasStateRef.viewState.stickerLinks || []) : [],
         },
@@ -282,6 +290,10 @@ export function initHistory(cs, initialLayers = []) {
       panX: cs ? cs.panX : 0,
       panY: cs ? cs.panY : 0,
       zoom: cs ? cs.zoom : 1,
+      canvasMode: cs ? (cs.canvasMode || 'infinite') : 'infinite',
+      pageFormat: cs ? (cs.pageFormat || 'A4') : 'A4',
+      pageOrientation: cs ? (cs.pageOrientation || 'portrait') : 'portrait',
+      showPageGuides: cs ? (cs.showPageGuides !== false) : true,
       rulers: cs ? (cs.rulers || []) : [],
       stickerLinks: cs && cs.viewState ? (cs.viewState.stickerLinks || []) : [],
     },

@@ -1,6 +1,7 @@
 // --- START OF FILE js/utils.js ---
 
-import { getBoundingBox, rotatePoint, getTransformedBoundingBox } from './geometry.js?v=1.2.6';
+import { getBoundingBox, rotatePoint, getTransformedBoundingBox } from './geometry.js?v=1.4.19';
+import * as rulerTools from './rulerTools.js?v=1.4.19';
 
 export const mediaCache = {};
 
@@ -82,8 +83,46 @@ export function normalizeTextFonts(layer) {
     return layer;
 }
 
+// Формулы в тексте раньше были редактируемыми и имели фиксированный кегль.
+// Делаем их неделимыми (править — только в редакторе) и, если нужно,
+// переводим размер на 1em, чтобы он наследовался от текста.
+export function migrateInlineFormulaSizes(content, { resize = true } = {}) {
+    if (!content || content.indexOf('data-math') === -1) return content;
+    try {
+        const div = document.createElement('div');
+        div.innerHTML = content;
+        let changed = false;
+
+        div.querySelectorAll('[data-math]').forEach((span) => {
+            if (span.getAttribute('contenteditable') !== 'false') {
+                span.setAttribute('contenteditable', 'false');
+                changed = true;
+            }
+            span.querySelectorAll('[data-row]').forEach((row) => {
+                if (row.hasAttribute('contenteditable')) {
+                    row.removeAttribute('contenteditable');
+                    changed = true;
+                }
+            });
+            const root = span.querySelector('[data-math-root]');
+            if (resize && root && root.style.fontSize !== '1em') {
+                root.style.fontSize = '1em';
+                changed = true;
+            }
+        });
+
+        return changed ? div.innerHTML : content;
+    } catch (e) {
+        return content;
+    }
+}
+
 export function createTextImage(layer, skipFonts = false, lineHeight = 1.2) {
     normalizeTextFonts(layer);
+    if (layer.content && layer.content.indexOf('data-math') !== -1) {
+        // При отрисовке только снимаем редактируемость, размер не трогаем.
+        layer.content = migrateInlineFormulaSizes(layer.content, { resize: false });
+    }
     window.__localFontsCssByFamily = window.__localFontsCssByFamily || {};
     return new Promise((resolve) => {
         (async () => {
@@ -475,6 +514,11 @@ export async function rehydrateLayers(layers) {
             }
         } else if (layer.type === 'text') {
             normalizeTextFonts(layer);
+            // Формулы внутри текста раньше хранились с фиксированным кеглем —
+            // переводим их на «1em», чтобы они жили в размере текста слоя.
+            if (layer.content && layer.content.indexOf('data-math') !== -1) {
+                layer.content = migrateInlineFormulaSizes(layer.content);
+            }
             if (!layer.cachedImage && layer.content) {
                 textLayersToRender.push(layer);
             }
@@ -509,6 +553,7 @@ export function serializeLayers(layers) {
         delete newLayer.pdfDoc;
         delete newLayer.renderedPages;
         delete newLayer.cachedImage;
+        delete newLayer._plotCache;
 
         return newLayer;
     });
@@ -521,6 +566,7 @@ export function cloneLayersForAction(layers) {
         if (safe.pdfDoc) delete safe.pdfDoc;
         if (safe.renderedPages) delete safe.renderedPages;
         if (safe.cachedImage) delete safe.cachedImage;
+        if (safe._plotCache) delete safe._plotCache;
         if ('isEditing' in safe) delete safe.isEditing; // ИЗМЕНЕНИЕ: предотвращает зависание слоев в невидимом состоянии
         
         // Do not structuredClone massive base64 strings to save memory and CPU
@@ -628,11 +674,25 @@ export function snapToRulers(pos, rulers, zoom) {
                     savedSin = Math.sin(ruler.angle);
                 }
             }
+        } else if (rulerTools.isTriangleRuler(ruler)) {
+            // Угольник: прилипаем к любому из трёх рёбер.
+            const edges = rulerTools.getTriangleEdgesLocal(ruler);
+            for (const edge of edges) {
+                const cp = rulerTools.closestPointOnSegment(localX, localY, edge.ax, edge.ay, edge.bx, edge.by);
+                const dist = Math.hypot(localX - cp.x, localY - cp.y);
+                if (dist < SNAP_THRESHOLD && dist < minDistance) {
+                    minDistance = dist;
+                    closestRuler = ruler;
+                    snappedLocalX = cp.x;
+                    snappedLocalY = cp.y;
+                    savedCos = Math.cos(ruler.angle);
+                    savedSin = Math.sin(ruler.angle);
+                }
+            }
         } else {
             // Straight ruler logic
             const halfL = ruler.length / 2;
             const halfW = ruler.width / 2;
-            
             if (localX < -halfL || localX > halfL) continue;
             
             const distTop = Math.abs(localY - (-halfW));

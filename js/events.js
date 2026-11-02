@@ -1,9 +1,9 @@
-import { getEditorTextarea } from './text.js?v=1.2.6';
-import { getGroupBoundingBox } from './geometry.js?v=1.2.6';
-import * as geo from './geometry.js?v=1.2.6';
-import { drawLayer } from './renderer.js?v=1.2.6';
-import * as utils from './utils.js?v=1.2.6';
-import { updateCursor } from './ui.js?v=1.2.6';
+import { getEditorTextarea } from './text.js?v=1.4.19';
+import { getGroupBoundingBox } from './geometry.js?v=1.4.19';
+import * as geo from './geometry.js?v=1.4.19';
+import { drawLayer } from './renderer.js?v=1.4.19';
+import * as utils from './utils.js?v=1.4.19';
+import { updateCursor } from './ui.js?v=1.4.19';
 
 const shapes2DOrder = ['rect', 'ellipse', 'line', 'curve', 'parallelogram', 'triangle', 'trapezoid', 'rhombus'];
 const shapes3DOrder = ['sphere', 'cone', 'parallelepiped', 'pyramid', 'frustum', 'truncated-pyramid', 'truncated-sphere'];
@@ -409,6 +409,16 @@ export function initializeEventListeners(canvasState, handlers) {
             case 'KeyK':
                 e.preventDefault();
                 document.getElementById('addStickerBtn')?.click();
+                drawingCanvas.focus({ preventScroll: true });
+                break;
+            case 'KeyF':
+                e.preventDefault();
+                document.getElementById('addFormulaMenuBtn')?.click();
+                drawingCanvas.focus({ preventScroll: true });
+                break;
+            case 'KeyG':
+                e.preventDefault();
+                document.getElementById('addPlotMenuBtn')?.click();
                 drawingCanvas.focus({ preventScroll: true });
                 break;
             case 'KeyS':

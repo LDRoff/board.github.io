@@ -1,10 +1,12 @@
 // --- START OF FILE js/ui.js ---
 
-import * as geo from './geometry.js?v=1.2.6';
-import * as layerManager from './layerManager.js?v=1.2.6';
-import { getSelectionRotation } from './hitTest.js?v=1.2.6';
-import { getEditorTextarea, getFormatState } from './text.js?v=1.2.6';
-import { getEraserCursorStyle } from './utils.js?v=1.2.6';
+import * as geo from './geometry.js?v=1.4.19';
+import * as layerManager from './layerManager.js?v=1.4.19';
+import { getSelectionRotation } from './hitTest.js?v=1.4.19';
+import { getEditorTextarea, getFormatState } from './text.js?v=1.4.19';
+import { getEraserCursorStyle } from './utils.js?v=1.4.19';
+import * as rulerTools from './rulerTools.js?v=1.4.19';
+import { mathHasVariable } from './mathModel.js?v=1.4.19';
 
 // --- Иконки-курсоры (загружаются из webp, конвертируются в PNG для курсора) ---
 let brushCursorStyle = null;          // для обычной кисти
@@ -286,11 +288,18 @@ export function updateFloatingToolbar(state) {
     const selectionToolbar = document.getElementById('floating-selection-toolbar');
     const pdfToolbar = document.getElementById('floating-pdf-toolbar');
     const curveToolbar = document.getElementById('floating-curve-toolbar');
+    const formulaToolbar = document.getElementById('floating-formula-toolbar');
+    const plotToolbar = document.getElementById('floating-plot-toolbar');
 
     textToolbar.classList.remove('visible');
     selectionToolbar.classList.remove('visible');
     pdfToolbar.classList.remove('visible');
     curveToolbar.classList.remove('visible');
+    if (formulaToolbar) formulaToolbar.classList.remove('visible');
+    if (plotToolbar) plotToolbar.classList.remove('visible');
+
+    // Пока элемент тащат или вращают — панель не показываем.
+    if (state.isInteracting) return;
 
     if (state.isEditingText) {
         const editorDiv = getEditorTextarea();
@@ -327,12 +336,13 @@ export function updateFloatingToolbar(state) {
 
             const styleDropdownBtn = textToolbar.querySelector('#style-dropdown-btn');
             if (styleDropdownBtn) {
-                styleDropdownBtn.classList.toggle('active', format.bold || format.italic || format.underline || format.strikeThrough);
+                // Кнопка-триггер не подсвечивается: состояние видно по пунктам списка.
+                styleDropdownBtn.classList.remove('active');
             }
 
             const indexDropdownBtn = textToolbar.querySelector('#index-dropdown-btn');
             if (indexDropdownBtn) {
-                indexDropdownBtn.classList.toggle('active', format.superscript || format.subscript);
+                indexDropdownBtn.classList.remove('active');
             }
 
             textToolbar.querySelector('[data-action="align-left"]').classList.toggle('active', format.alignLeft);
@@ -349,7 +359,8 @@ export function updateFloatingToolbar(state) {
                             ? 'icons_bord/icon-rightravn.webp'
                             : 'icons_bord/icon-leftravn.webp';
                 }
-                alignTrigger.classList.add('active');
+                // Сама кнопка не подсвечивается — активный пункт выбирается в списке.
+                alignTrigger.classList.remove('active');
             }
 
             const bulletBtn = textToolbar.querySelector('[data-action="list-bullet"]');
@@ -411,7 +422,9 @@ export function updateFloatingToolbar(state) {
     const isSingleTextSelection = isSingleSelection && selectedLayersForToolbar[0].type === 'text';
     const isSinglePdfSelection = isSingleSelection && selectedLayersForToolbar[0].type === 'pdf';
     const isSingleCurveSelection = isSingleSelection && selectedLayersForToolbar[0].type === 'curve';
-    const isGeneralSelection = hasSelection && !isSingleTextSelection && !isSinglePdfSelection && !isSingleCurveSelection;
+    const isSingleFormulaSelection = isSingleSelection && selectedLayersForToolbar[0].type === 'formula';
+    const isSinglePlotSelection = isSingleSelection && selectedLayersForToolbar[0].type === 'plot';
+    const isGeneralSelection = hasSelection && !isSingleTextSelection && !isSinglePdfSelection && !isSingleCurveSelection && !isSingleFormulaSelection && !isSinglePlotSelection;
 
     let rotationHandleRect = null;
     if (hasSelection) {
@@ -489,12 +502,12 @@ export function updateFloatingToolbar(state) {
 
             const styleDropdownBtn = textToolbar.querySelector('#style-dropdown-btn');
             if (styleDropdownBtn) {
-                styleDropdownBtn.classList.toggle('active', layer.fontWeight === 'bold' || layer.fontStyle === 'italic' || layer.textDecoration === 'underline' || layer.textDecoration === 'line-through');
+                styleDropdownBtn.classList.remove('active');
             }
 
             const indexDropdownBtn = textToolbar.querySelector('#index-dropdown-btn');
             if (indexDropdownBtn) {
-                indexDropdownBtn.classList.toggle('active', isSuper || isSub);
+                indexDropdownBtn.classList.remove('active');
             }
 
             const alignTrigger = textToolbar.querySelector('#align-dropdown-btn');
@@ -507,8 +520,14 @@ export function updateFloatingToolbar(state) {
                             ? 'icons_bord/icon-rightravn.webp'
                             : 'icons_bord/icon-leftravn.webp';
                 }
-                alignTrigger.classList.add('active');
+                // Сама кнопка не подсвечивается — активный пункт выбирается в списке.
+                alignTrigger.classList.remove('active');
             }
+
+            const alignCurrent = layer.align === 'center' ? 'align-center' : layer.align === 'right' ? 'align-right' : 'align-left';
+            textToolbar.querySelectorAll('#align-options [data-action^="align-"]').forEach((btn) => {
+                btn.classList.toggle('active', btn.dataset.action === alignCurrent);
+            });
 
             const bulletBtn = textToolbar.querySelector('[data-action="list-bullet"]');
             if (bulletBtn) bulletBtn.classList.toggle('active', /<ul[\s>]/i.test(layer.content || ''));
@@ -547,6 +566,38 @@ export function updateFloatingToolbar(state) {
                 bottom: ((box.y + box.height) * state.zoom) + state.panY,
             };
             positionElement(curveToolbar, screenRect, rotationHandleRect);
+        }
+    } else if (isSingleFormulaSelection) {
+        formulaToolbar.classList.add('visible');
+        const layer = selectedLayersForToolbar[0];
+        const box = geo.getBoundingBox(layer);
+        if (box) {
+            const screenRect = {
+                left: (box.x * state.zoom) + state.panX,
+                top: (box.y * state.zoom) + state.panY,
+                width: box.width * state.zoom,
+                height: box.height * state.zoom,
+                right: ((box.x + box.width) * state.zoom) + state.panX,
+                bottom: ((box.y + box.height) * state.zoom) + state.panY,
+            };
+            const graphBtn = formulaToolbar.querySelector('#formulaGraphBtn');
+            if (graphBtn) graphBtn.style.display = mathHasVariable(layer.math) ? '' : 'none';
+            positionElement(formulaToolbar, screenRect);
+        }
+    } else if (isSinglePlotSelection) {
+        plotToolbar.classList.add('visible');
+        const layer = selectedLayersForToolbar[0];
+        const box = geo.getBoundingBox(layer);
+        if (box) {
+            const screenRect = {
+                left: (box.x * state.zoom) + state.panX,
+                top: (box.y * state.zoom) + state.panY,
+                width: box.width * state.zoom,
+                height: box.height * state.zoom,
+                right: ((box.x + box.width) * state.zoom) + state.panX,
+                bottom: ((box.y + box.height) * state.zoom) + state.panY,
+            };
+            positionElement(plotToolbar, screenRect);
         }
     } else if (isGeneralSelection) {
         selectionToolbar.classList.add('visible');
@@ -708,6 +759,11 @@ export function updateCursor(state, handle, rotation = 0) {
         return;
     }
 
+    if (handle === 'resize') {
+        state.canvas.style.cursor = 'nwse-resize';
+        return;
+    }
+
     const cursors = ['ns-resize', 'nesw-resize', 'ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize', 'ew-resize', 'nwse-resize'];
     const baseIndexMap = {
         top: 0, topRight: 1, right: 2, bottomRight: 3,
@@ -810,6 +866,31 @@ export function hideRulerSettings() {
     if (rulerRedrawCallback) rulerRedrawCallback();
 }
 
+// Размер угольника в сантиметрах: список фиксированный, но после
+// перетаскивания ручки размер может быть любым — тогда добавляем пункт.
+function applyTriangleSizeToSelect(ruler) {
+    const sizeSelect = document.getElementById('ruler-size-select');
+    if (!sizeSelect) return;
+
+    const cm = Math.round((rulerTools.clampSize(ruler.size) / rulerTools.CM) * 10) / 10;
+    let custom = sizeSelect.querySelector('option[data-custom="1"]');
+
+    if (rulerTools.TRIANGLE_SIZES_CM.includes(cm)) {
+        if (custom) custom.remove();
+        sizeSelect.value = String(cm);
+        return;
+    }
+
+    if (!custom) {
+        custom = document.createElement('option');
+        custom.dataset.custom = '1';
+        sizeSelect.appendChild(custom);
+    }
+    custom.value = String(cm);
+    custom.textContent = `${cm} см`;
+    sizeSelect.value = String(cm);
+}
+
 export function showRulerSettings(ruler, screenX, screenY, state, redrawCallback) {
     const menu = document.getElementById('floating-ruler-toolbar');
     if (!menu) return;
@@ -818,14 +899,21 @@ export function showRulerSettings(ruler, screenX, screenY, state, redrawCallback
     rulerRedrawCallback = redrawCallback;
     rulerStateRef = state;
 
+    const isTriangle = rulerTools.isTriangleRuler(ruler);
+
     // Fill current values
     const lengthSelect = document.getElementById('ruler-length-select');
-    if (ruler.type === 'protractor') {
-        lengthSelect.style.display = 'none';
-    } else {
-        lengthSelect.style.display = 'block';
-        lengthSelect.value = ruler.length.toString();
+    const sizeSelect = document.getElementById('ruler-size-select');
+    if (sizeSelect) sizeSelect.style.display = isTriangle ? 'block' : 'none';
+    if (lengthSelect) {
+        if (ruler.type === 'protractor' || isTriangle) {
+            lengthSelect.style.display = 'none';
+        } else {
+            lengthSelect.style.display = 'block';
+            lengthSelect.value = ruler.length.toString();
+        }
     }
+    if (isTriangle) applyTriangleSizeToSelect(ruler);
     
     // Default color is derived from theme if null, but let's show #cccccc or something if null
     const isDarkMode = document.body.classList.contains('dark-theme');
@@ -865,7 +953,12 @@ export function showRulerSettings(ruler, screenX, screenY, state, redrawCallback
     const sin = Math.sin(ruler.angle);
     
     let pts;
-    if (ruler.type === 'protractor') {
+    if (isTriangle) {
+        // Панель ставим над всем инструментом, включая его кнопки.
+        const handles = rulerTools.getTriangleHandles(ruler, 1 / zoom);
+        pts = rulerTools.getTriangleOutline(ruler).map(p => [p.x, p.y]);
+        pts.push([handles.delete.x, handles.delete.y], [handles.settings.x, handles.settings.y]);
+    } else if (ruler.type === 'protractor') {
         const radius = ruler.radius || 200;
         const baseH = 45 / zoom;
         pts = [
@@ -886,7 +979,11 @@ export function showRulerSettings(ruler, screenX, screenY, state, redrawCallback
     }));
 
     const rulerTopScreenY = Math.min(...projected.map(p => p.sy));
-    const rulerCenterScreenX = (ruler.x * zoom + panX);
+    // Угольник стоит прямым углом в (x, y), поэтому панель центрируем
+    // по корпусу, а не по точке привязки.
+    const rulerCenterScreenX = isTriangle
+        ? (Math.min(...projected.map(p => p.sx)) + Math.max(...projected.map(p => p.sx))) / 2
+        : (ruler.x * zoom + panX);
     
     let left = rulerCenterScreenX - menuWidth / 2;
     let top = rulerTopScreenY - menuHeight - 10; // 10px gap above ruler
@@ -916,6 +1013,12 @@ export function syncRulerSettingsAngle() {
     }
 }
 
+export function syncRulerSettingsSize() {
+    if (!activeRulerForSettings) return;
+    if (!rulerTools.isTriangleRuler(activeRulerForSettings)) return;
+    applyTriangleSizeToSelect(activeRulerForSettings);
+}
+
 // Setup listeners once
 document.addEventListener('DOMContentLoaded', () => {
     const menu = document.getElementById('floating-ruler-toolbar');
@@ -936,6 +1039,19 @@ document.addEventListener('DOMContentLoaded', () => {
             if (rulerRedrawCallback) rulerRedrawCallback();
         }
     });
+
+    // Размер угольника: длинный катет в сантиметрах.
+    const sizeSelect = document.getElementById('ruler-size-select');
+    if (sizeSelect) {
+        sizeSelect.addEventListener('change', (e) => {
+            if (!rulerTools.isTriangleRuler(activeRulerForSettings)) return;
+            const cm = parseFloat(e.target.value);
+            if (!Number.isFinite(cm) || cm <= 0) return;
+            activeRulerForSettings.size = rulerTools.clampSize(cm * rulerTools.CM);
+            saveRulerState();
+            if (rulerRedrawCallback) rulerRedrawCallback();
+        });
+    }
 
     // Custom palette logic
     const applyBtn = document.getElementById('ruler-apply-btn');
